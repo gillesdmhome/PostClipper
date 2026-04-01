@@ -1,0 +1,15 @@
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+sqlalchemy==2.0.36
+aiosqlite==0.20.0
+httpx==0.28.1
+pydantic-settings==2.6.1
+# Last release supporting Python 3.9 is 2025.10.14; use Python 3.10+ for newer yt-dlp (better YouTube fixes).
+yt-dlp>=2025.10.14
+
+# Optional ASR (install separately if GPU/CPU ok):
+# faster-whisper>=1.0.0
+
+# Optional YouTube upload:
+# google-api-python-client google-auth-oauthlib google-auth-httplib2

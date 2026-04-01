@@ -1,0 +1,5 @@
+# Optional: semantic clip ranking + real speech-to-text (GPU if CUDA available).
+# Install: pip install -r requirements-ml.txt
+# Then set SUGGEST_ENGINE=embeddings in backend/.env
+sentence-transformers>=3.0.0
+faster-whisper>=1.0.0
