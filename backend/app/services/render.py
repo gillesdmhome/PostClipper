@@ -44,11 +44,13 @@ def segments_to_ass_for_range(
         "BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, "
         "BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding"
     )
-    margin = int(video_width * 0.06)
-    # white text, black outline, bottom center
+    # Subtitle style: smaller text, bottom-center, comfortable bottom margin.
+    # For 1080px wide video, aim for ~28-34px font.
+    font_size = max(28, video_width // 34)
+    margin_v = int(video_width * 0.09)
     lines.append(
-        f"Style: Default,Arial,{max(48, video_width // 20)},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
-        f"0,0,0,0,100,100,0,0,1,4,2,2,0,0,{margin},1"
+        f"Style: Default,Arial,{font_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
+        f"0,0,0,0,100,100,0,0,1,2,1,2,0,0,{margin_v},1"
     )
     lines.append("")
     lines.append("[Events]")

@@ -1,38 +1,15 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import ClipReviewGrid from "../components/ClipReviewGrid";
-import {
-  fetchJob,
-  generateClips,
-  JobDetail as JobDetailT,
-  renderDrafts,
-  suggestClips,
-  transcribe,
-} from "../api";
+import { generateClips, renderDrafts, suggestClips, transcribe } from "../api";
+import { useJobDetail, refreshJobDetail } from "../state/jobsStore";
 
 export default function JobDetail() {
   const { id } = useParams<{ id: string }>();
-  const [data, setData] = useState<JobDetailT | null>(null);
+  const { data, loading, error, refresh } = useJobDetail(id);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [busyAction, setBusyAction] = useState<"generate" | "transcribe" | "suggest" | "render" | null>(null);
-
-  async function load() {
-    if (!id) return;
-    try {
-      const j = await fetchJob(id);
-      setData(j);
-      setErr(null);
-    } catch (e) {
-      setErr(String(e));
-    }
-  }
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 3000);
-    return () => clearInterval(t);
-  }, [id]);
 
   if (!id) return null;
 
@@ -43,7 +20,7 @@ export default function JobDetail() {
     try {
       const res = await generateClips(id);
       setMsg(res.message ?? "Queued: transcribe (if needed) → suggest → render");
-      await load();
+      await refresh({ force: true });
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -60,7 +37,7 @@ export default function JobDetail() {
       if (step === "suggest") await suggestClips(id);
       if (step === "render") await renderDrafts(id);
       setMsg(`Queued: ${step}`);
-      await load();
+      await refresh({ force: true });
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -68,8 +45,14 @@ export default function JobDetail() {
     }
   }
 
-  if (err && !data) return <p style={{ color: "crimson" }}>{err}</p>;
-  if (!data) return <p>Loading…</p>;
+  if ((err || error) && !data) return <p style={{ color: "crimson" }}>{err ?? error}</p>;
+  if (!data) {
+    return (
+      <div className="card">
+        <p style={{ margin: 0, color: "#64748b" }}>{loading ? "Loading job details…" : "Job not found."}</p>
+      </div>
+    );
+  }
 
   const proxySrc = `/api/jobs/${id}/media/proxy`;
 
@@ -197,7 +180,7 @@ export default function JobDetail() {
 
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Suggested clips</h3>
-        <ClipReviewGrid candidates={data.candidates} onRefresh={load} />
+        <ClipReviewGrid candidates={data.candidates} onRefresh={() => (id ? refreshJobDetail(id, { force: true }) : undefined)} />
       </div>
 
       <div className="card">

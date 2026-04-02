@@ -1,32 +1,15 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Link } from "react-router-dom";
-import { Dashboard as Dash, fetchDashboard, fetchJobs, ingestTwitch, ingestYoutube, JobSummary, uploadRecordingWithProgress } from "../api";
+import { ingestTwitch, ingestYoutube, uploadRecordingWithProgress } from "../api";
+import { useJobsDashboard } from "../state/jobsStore";
 
 export default function Dashboard() {
-  const [jobs, setJobs] = useState<JobSummary[]>([]);
-  const [dash, setDash] = useState<Dash | null>(null);
+  const { jobs, dashboard: dash, loading, error } = useJobsDashboard();
   const [yt, setYt] = useState("");
   const [tw, setTw] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
-
-  async function refresh() {
-    try {
-      const [j, d] = await Promise.all([fetchJobs(), fetchDashboard()]);
-      setJobs(j);
-      setDash(d);
-      setErr(null);
-    } catch (e) {
-      setErr(String(e));
-    }
-  }
-
-  useEffect(() => {
-    refresh();
-    const t = setInterval(refresh, 5000);
-    return () => clearInterval(t);
-  }, []);
 
   async function onYoutube(e: FormEvent) {
     e.preventDefault();
@@ -34,7 +17,6 @@ export default function Dashboard() {
     try {
       const { job_id } = await ingestYoutube(yt);
       setYt("");
-      await refresh();
       window.location.href = `/job/${job_id}`;
     } catch (e) {
       setErr(String(e));
@@ -49,7 +31,6 @@ export default function Dashboard() {
     try {
       const { job_id } = await ingestTwitch(tw);
       setTw("");
-      await refresh();
       window.location.href = `/job/${job_id}`;
     } catch (e) {
       setErr(String(e));
@@ -67,7 +48,6 @@ export default function Dashboard() {
       const { job_id } = await uploadRecordingWithProgress(f, (pct) => {
         setUploadPct(pct);
       });
-      await refresh();
       window.location.href = `/job/${job_id}`;
     } catch (err) {
       setErr(String(err));
@@ -104,10 +84,18 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+      {!dash && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Dashboard</h2>
+          <p style={{ color: "#64748b", fontSize: "0.9rem" }}>
+            {loading ? "Loading jobs summary…" : "No jobs yet — start a new ingest below."}
+          </p>
+        </div>
+      )}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>New ingest</h2>
-        {err && <p style={{ color: "crimson" }}>{err}</p>}
+        {(err || error) && <p style={{ color: "crimson" }}>{err ?? error}</p>}
         <form onSubmit={onYoutube} style={{ marginBottom: 12 }}>
           <label>YouTube VOD URL</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
@@ -156,6 +144,20 @@ export default function Dashboard() {
             </tr>
           </thead>
           <tbody>
+            {loading && jobs.length === 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: "0.75rem", color: "#64748b" }}>
+                  Loading jobs…
+                </td>
+              </tr>
+            )}
+            {!loading && jobs.length === 0 && (
+              <tr>
+                <td colSpan={5} style={{ padding: "0.75rem", color: "#64748b" }}>
+                  No jobs yet — start a new ingest above.
+                </td>
+              </tr>
+            )}
             {jobs.map((j) => (
               <tr key={j.id}>
                 <td style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{j.id.slice(0, 8)}…</td>

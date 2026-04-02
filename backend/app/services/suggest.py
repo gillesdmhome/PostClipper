@@ -93,13 +93,27 @@ def finalize_scored_candidates(
     target_max: float,
     max_candidates: int,
     exclude_ranges: Optional[List[Tuple[float, float]]] = None,
+    enforce_non_overlap: bool = True,
+    non_overlap_pad: float = 2.0,
 ) -> list[dict[str, Any]]:
-    """Sort by score, apply exclusion, cap count, single-window fallback."""
+    """Sort by score, apply exclusion, optionally enforce non-overlap, cap count, single-window fallback."""
     scored = sorted(scored, key=lambda x: x["score"], reverse=True)
     ex = exclude_ranges or []
     if ex:
         scored = [x for x in scored if not overlaps_excluded(x["start_sec"], x["end_sec"], ex)]
-    out = scored[:max_candidates]
+    if enforce_non_overlap:
+        picked: list[dict[str, Any]] = []
+        picked_ranges: list[Tuple[float, float]] = []
+        for x in scored:
+            if overlaps_excluded(x["start_sec"], x["end_sec"], picked_ranges, pad=non_overlap_pad):
+                continue
+            picked.append(x)
+            picked_ranges.append((float(x["start_sec"]), float(x["end_sec"])))
+            if len(picked) >= max_candidates:
+                break
+        out = picked
+    else:
+        out = scored[:max_candidates]
     if not out and merged:
         start = float(merged[0]["start"])
         end = float(merged[-1]["end"])
