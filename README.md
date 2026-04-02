@@ -1,13 +1,13 @@
-# Clip Social Pipeline
+# PostClipper
 
 Semi-automated ingestion (YouTube, Twitch, uploads), transcription, clip suggestions, vertical rendering, review UI, and publish/export handoff for TikTok, Instagram Reels, and YouTube Shorts.
 
 ## Prerequisites
 
-- **Python 3.10+** (required for a clean yt-dlp experience; 3.9 shows deprecation warnings)
+- **Python 3.10+**
 - **Node.js 18+** (includes `npm`). Install from [nodejs.org](https://nodejs.org) or: `winget install OpenJS.NodeJS.LTS`
 - **ffmpeg** and **ffprobe** (Windows: `winget install Gyan.FFmpeg`). If the API is started from the IDE and still cannot find them, set **`FFMPEG_PATH`** and **`FFPROBE_PATH`** in `backend/.env` to the full paths of `ffmpeg.exe` and `ffprobe.exe` (see `backend/.env.example`).
-- **yt-dlp** on PATH (for YouTube/Twitch VOD download)
+- **yt-dlp** is installed via `backend/requirements.txt`
 - Optional ML stack (recommended): **`pip install -r requirements-ml.txt`** — installs **faster-whisper** (real ASR; avoids placeholder transcript text) and **sentence-transformers** (set **`SUGGEST_ENGINE=embeddings`** in `backend/.env`). After installing, **re-run transcribe / generate clips** on a job so the DB is not stuck on old placeholder segments.
 
 ## Quick start
@@ -17,7 +17,7 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate   # Windows
 pip install -r requirements.txt
-# Optional: pip install faster-whisper torch
+# Optional ML: pip install -r requirements-ml.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -35,6 +35,14 @@ If your terminal was opened **before** Node was installed and `node` / `npm` are
 .\dev-frontend.ps1
 ```
 
+## URLs you will use (dev)
+
+- **Frontend UI**: `http://localhost:5173`
+- **Backend API**: `http://127.0.0.1:8000`
+- **Health check**: `GET /health` (example: `http://127.0.0.1:8000/health`)
+
+If you can open `http://localhost:5173` but not `http://127.0.0.1:5173`, ensure Vite is bound to IPv4. In `frontend/vite.config.ts`, set `server.host = "0.0.0.0"` and restart `npm run dev`.
+
 ## API overview
 
 | Method | Path | Description |
@@ -51,6 +59,56 @@ If your terminal was opened **before** Node was installed and `node` / `npm` are
 | POST | `/api/candidates/{id}/publish` | Queue publish (YouTube if configured, else export bundle) |
 
 Set `YOUTUBE_CLIENT_SECRETS_PATH` and complete OAuth flow for direct Shorts upload (see `docs/platforms.md`).
+
+## How to use the API (examples)
+
+### Start a new ingest
+
+- **YouTube**
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/ingest/youtube ^
+  -H "Content-Type: application/json" ^
+  -d "{\"url\":\"https://www.youtube.com/watch?v=VIDEO_ID\"}"
+```
+
+- **Twitch**
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/ingest/twitch ^
+  -H "Content-Type: application/json" ^
+  -d "{\"url\":\"https://www.twitch.tv/videos/VIDEO_ID\"}"
+```
+
+- **Upload a file**
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/ingest/upload ^
+  -F "file=@C:\\path\\to\\video.mp4"
+```
+
+All ingest endpoints return `{ "job_id": "...", "status": "pending" }` and then work continues in the background. Open the UI and navigate to `/job/{job_id}` to watch progress/logs.
+
+### Generate clips (main workflow)
+
+After ingest is finished (the job has a mezzanine), queue the pipeline:
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/jobs/JOB_ID/generate-clips -H "Content-Type: application/json" -d "{}"
+```
+
+This queues: **transcribe (if needed) → suggest clips → render drafts**.
+
+### Inspect status + logs
+
+```bash
+curl http://127.0.0.1:8000/api/jobs
+curl http://127.0.0.1:8000/api/jobs/JOB_ID
+```
+
+### Media preview URLs
+
+- Proxy preview: `GET /api/jobs/{job_id}/media/proxy`\n+- Mezzanine: `GET /api/jobs/{job_id}/media/mezzanine`\n+- Draft per candidate: `GET /api/candidates/{candidate_id}/media/draft`
 
 ### YouTube downloads (403 / cookies)
 
