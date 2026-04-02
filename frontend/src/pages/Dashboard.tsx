@@ -1,14 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  Dashboard as Dash,
-  fetchDashboard,
-  fetchJobs,
-  ingestTwitch,
-  ingestYoutube,
-  JobSummary,
-  uploadRecording,
-} from "../api";
+import { Dashboard as Dash, fetchDashboard, fetchJobs, ingestTwitch, ingestYoutube, JobSummary, uploadRecordingWithProgress } from "../api";
 
 export default function Dashboard() {
   const [jobs, setJobs] = useState<JobSummary[]>([]);
@@ -17,6 +9,7 @@ export default function Dashboard() {
   const [tw, setTw] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [uploadPct, setUploadPct] = useState<number | null>(null);
 
   async function refresh() {
     try {
@@ -69,14 +62,18 @@ export default function Dashboard() {
     const f = e.target.files?.[0];
     if (!f) return;
     setBusy(true);
+    setUploadPct(0);
     try {
-      const { job_id } = await uploadRecording(f);
+      const { job_id } = await uploadRecordingWithProgress(f, (pct) => {
+        setUploadPct(pct);
+      });
       await refresh();
       window.location.href = `/job/${job_id}`;
     } catch (err) {
       setErr(String(err));
     } finally {
       setBusy(false);
+      setUploadPct(null);
       e.target.value = "";
     }
   }
@@ -89,9 +86,18 @@ export default function Dashboard() {
           <p>
             <strong>{dash.total_jobs}</strong> jobs · <strong>{dash.failed_jobs}</strong> failed
           </p>
-          <div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
             {Object.entries(dash.by_status).map(([k, v]) => (
-              <span key={k} className="badge" style={{ marginRight: 6 }}>
+              <span
+                key={k}
+                className={
+                  k === "failed"
+                    ? "badge status-badge status-failed"
+                    : k === "rendered"
+                    ? "badge status-badge status-done"
+                    : "badge status-badge"
+                }
+              >
                 {k}: {v}
               </span>
             ))}
@@ -106,8 +112,8 @@ export default function Dashboard() {
           <label>YouTube VOD URL</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
             <input value={yt} onChange={(e) => setYt(e.target.value)} placeholder="https://..." />
-            <button type="submit" className="primary" disabled={busy}>
-              Start
+            <button type="submit" className={`primary${busy ? " btn-loading" : ""}`} disabled={busy}>
+              {busy ? "Starting…" : "Start"}
             </button>
           </div>
         </form>
@@ -115,14 +121,25 @@ export default function Dashboard() {
           <label>Twitch VOD URL</label>
           <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
             <input value={tw} onChange={(e) => setTw(e.target.value)} placeholder="https://..." />
-            <button type="submit" className="primary" disabled={busy}>
-              Start
+            <button type="submit" className={`primary${busy ? " btn-loading" : ""}`} disabled={busy}>
+              {busy ? "Starting…" : "Start"}
             </button>
           </div>
         </form>
         <div>
           <label>Zoom / podcast file</label>
           <input type="file" accept="video/*,audio/*" onChange={onFileChange} disabled={busy} style={{ marginTop: 4 }} />
+          {uploadPct !== null && (
+            <div style={{ marginTop: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", color: "#475569" }}>
+                <span>Uploading file…</span>
+                <span>{uploadPct}%</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-bar-fill" style={{ width: `${uploadPct}%` }} />
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -133,12 +133,48 @@ export const suggestAlternative = (id: string) =>
     body: "{}",
   });
 
-export async function uploadRecording(file: File): Promise<{ job_id: string }> {
+export async function uploadRecordingWithProgress(
+  file: File,
+  onProgress?: (percent: number, loaded: number, total: number) => void
+): Promise<{ job_id: string }> {
   const fd = new FormData();
   fd.append("file", file);
-  const r = await fetch("/api/ingest/upload", { method: "POST", body: fd });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json() as Promise<{ job_id: string }>;
+
+  return new Promise<{ job_id: string }>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+
+    xhr.open("POST", "/api/ingest/upload");
+
+    xhr.upload.onprogress = (evt) => {
+      if (!onProgress || !evt.lengthComputable) return;
+      const percent = Math.round((evt.loaded / evt.total) * 100);
+      onProgress(percent, evt.loaded, evt.total);
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Network error while uploading file"));
+    };
+
+    xhr.onload = () => {
+      if (xhr.status < 200 || xhr.status >= 300) {
+        const msg = xhr.responseText || `Upload failed with status ${xhr.status}`;
+        reject(new Error(msg));
+        return;
+      }
+      try {
+        const json = JSON.parse(xhr.responseText) as { job_id: string };
+        resolve(json);
+      } catch (e) {
+        reject(new Error("Upload succeeded but response was not valid JSON"));
+      }
+    };
+
+    xhr.send(fd);
+  });
+}
+
+export function uploadRecording(file: File): Promise<{ job_id: string }> {
+  return uploadRecordingWithProgress(file);
 }
 
 export const publishCandidate = (

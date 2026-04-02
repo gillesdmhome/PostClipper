@@ -188,15 +188,21 @@ export default function ClipReviewGrid({
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                       <button
                         type="button"
-                        className="primary"
+                        className={`primary${isBusy ? " btn-loading" : ""}`}
                         disabled={isBusy}
                         onClick={() => onAccept(c.id)}
                         style={{ flex: 1, minWidth: 100 }}
                       >
-                        Accept
+                        {isBusy ? "Saving…" : "Accept"}
                       </button>
-                      <button type="button" disabled={isBusy} onClick={() => onReject(c.id)} style={{ flex: 1, minWidth: 100 }}>
-                        Reject
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() => onReject(c.id)}
+                        style={{ flex: 1, minWidth: 100 }}
+                        className={isBusy ? "btn-loading" : undefined}
+                      >
+                        {isBusy ? "Updating…" : "Reject"}
                       </button>
                     </div>
                     <button
@@ -204,8 +210,9 @@ export default function ClipReviewGrid({
                       disabled={isBusy}
                       onClick={() => onSuggestAnother(c.id)}
                       title="Rejects this window and adds a different non-overlapping clip"
+                      className={isBusy ? "btn-loading" : undefined}
                     >
-                      Suggest another clip
+                      {isBusy ? "Searching…" : "Suggest another clip"}
                     </button>
                   </>
                 )}
