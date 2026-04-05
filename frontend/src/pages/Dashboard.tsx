@@ -1,23 +1,72 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ingestTwitch, ingestYoutube, uploadRecordingWithProgress } from "../api";
-import { useJobsDashboard } from "../state/jobsStore";
+import JobStatusProgress from "../components/JobStatusProgress";
+import { generateClips, ingestTwitch, ingestYoutube, uploadRecordingWithProgress } from "../api";
+import type { JobSummary } from "../api";
+import { jobIsTerminalForDetail } from "../jobStages";
+import { optimisticUpsertJob, useJobsDashboard } from "../state/jobsStore";
+
+function optimisticJobFromIngest(
+  jobId: string,
+  status: string,
+  fields: { source_type: string; source_url?: string | null; original_filename?: string | null }
+): JobSummary {
+  return {
+    id: jobId,
+    status,
+    source_type: fields.source_type,
+    source_url: fields.source_url ?? null,
+    original_filename: fields.original_filename ?? null,
+    mezzanine_path: null,
+    proxy_path: null,
+    duration_seconds: null,
+    error_message: null,
+    created_at: new Date().toISOString(),
+  };
+}
 
 export default function Dashboard() {
-  const { jobs, dashboard: dash, loading, error } = useJobsDashboard();
+  const { jobs, dashboard: dash, loading, error, refresh } = useJobsDashboard();
   const [yt, setYt] = useState("");
   const [tw, setTw] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [uploadPct, setUploadPct] = useState<number | null>(null);
+  const [generatingJobId, setGeneratingJobId] = useState<string | null>(null);
+
+  const hasActiveJobs = jobs.some((j) => !jobIsTerminalForDetail(j.status));
+
+  useEffect(() => {
+    if (!hasActiveJobs) return;
+    const id = window.setInterval(() => {
+      void refresh({ force: true, silent: true });
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [hasActiveJobs, refresh]);
+
+  async function onGenerateClips(jobId: string) {
+    setGeneratingJobId(jobId);
+    setErr(null);
+    try {
+      await generateClips(jobId);
+      void refresh({ force: true, silent: true });
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setGeneratingJobId(null);
+    }
+  }
 
   async function onYoutube(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     try {
-      const { job_id } = await ingestYoutube(yt);
+      const { job_id, status } = await ingestYoutube(yt);
+      optimisticUpsertJob(
+        optimisticJobFromIngest(job_id, status ?? "pending", { source_type: "youtube", source_url: yt })
+      );
       setYt("");
-      window.location.href = `/job/${job_id}`;
+      void refresh({ force: true, silent: true });
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -29,9 +78,12 @@ export default function Dashboard() {
     e.preventDefault();
     setBusy(true);
     try {
-      const { job_id } = await ingestTwitch(tw);
+      const { job_id, status } = await ingestTwitch(tw);
+      optimisticUpsertJob(
+        optimisticJobFromIngest(job_id, status ?? "pending", { source_type: "twitch", source_url: tw })
+      );
       setTw("");
-      window.location.href = `/job/${job_id}`;
+      void refresh({ force: true, silent: true });
     } catch (e) {
       setErr(String(e));
     } finally {
@@ -45,10 +97,13 @@ export default function Dashboard() {
     setBusy(true);
     setUploadPct(0);
     try {
-      const { job_id } = await uploadRecordingWithProgress(f, (pct) => {
+      const { job_id, status } = await uploadRecordingWithProgress(f, (pct) => {
         setUploadPct(pct);
       });
-      window.location.href = `/job/${job_id}`;
+      optimisticUpsertJob(
+        optimisticJobFromIngest(job_id, status ?? "pending", { source_type: "upload", original_filename: f.name })
+      );
+      void refresh({ force: true, silent: true });
     } catch (err) {
       setErr(String(err));
     } finally {
@@ -133,12 +188,17 @@ export default function Dashboard() {
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Jobs</h2>
+        <p style={{ color: "#64748b", fontSize: "0.88rem", marginTop: 0 }}>
+          In-progress jobs stay here with live status. Open the job page once clips are <strong>ready</strong> or the run{" "}
+          <strong>failed</strong> (to review errors and logs).
+        </p>
         <table>
           <thead>
             <tr>
               <th>ID</th>
               <th>Source</th>
               <th>Status</th>
+              <th>Progress</th>
               <th>Duration</th>
               <th></th>
             </tr>
@@ -146,14 +206,14 @@ export default function Dashboard() {
           <tbody>
             {loading && jobs.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ padding: "0.75rem", color: "#64748b" }}>
+                <td colSpan={6} style={{ padding: "0.75rem", color: "#64748b" }}>
                   Loading jobs…
                 </td>
               </tr>
             )}
             {!loading && jobs.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ padding: "0.75rem", color: "#64748b" }}>
+                <td colSpan={6} style={{ padding: "0.75rem", color: "#64748b" }}>
                   No jobs yet — start a new ingest above.
                 </td>
               </tr>
@@ -165,9 +225,25 @@ export default function Dashboard() {
                 <td>
                   <span className={j.status === "failed" ? "badge failed" : "badge"}>{j.status}</span>
                 </td>
+                <td>
+                  <JobStatusProgress status={j.status} variant="compact" />
+                </td>
                 <td>{j.duration_seconds != null ? `${j.duration_seconds.toFixed(1)}s` : "—"}</td>
                 <td>
-                  <Link to={`/job/${j.id}`}>Open</Link>
+                  {jobIsTerminalForDetail(j.status) ? (
+                    <Link to={`/job/${j.id}`}>Open</Link>
+                  ) : j.mezzanine_path ? (
+                    <button
+                      type="button"
+                      className={`primary${generatingJobId === j.id ? " btn-loading" : ""}`}
+                      disabled={generatingJobId !== null}
+                      onClick={() => onGenerateClips(j.id)}
+                    >
+                      {generatingJobId === j.id ? "Starting…" : "Generate clips"}
+                    </button>
+                  ) : (
+                    <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>Wait for ingest</span>
+                  )}
                 </td>
               </tr>
             ))}

@@ -68,15 +68,31 @@ export function subscribe(listener: Listener): () => void {
   };
 }
 
+/** Show a new job row immediately after ingest returns (before list refetch completes). */
+export function optimisticUpsertJob(summary: JobSummary): void {
+  const jobs = store.dashboard.jobs;
+  const idx = jobs.findIndex((j) => j.id === summary.id);
+  let next: JobSummary[];
+  if (idx >= 0) {
+    next = [...jobs];
+    next[idx] = { ...jobs[idx], ...summary };
+  } else {
+    next = [summary, ...jobs.filter((j) => j.id !== summary.id)];
+  }
+  setDashboardState({ jobs: next });
+}
+
 /** Refresh dashboard jobs + summary if stale or forced. */
-export async function refreshJobsDashboard(opts: { force?: boolean } = {}): Promise<void> {
+export async function refreshJobsDashboard(opts: { force?: boolean; silent?: boolean } = {}): Promise<void> {
   const now = Date.now();
-  const { force } = opts;
+  const { force, silent } = opts;
   const { loading, lastLoadedAt } = store.dashboard;
   const isStale = !lastLoadedAt || now - lastLoadedAt > 5000;
   if (!force && (loading || !isStale)) return;
 
-  setDashboardState({ loading: true });
+  if (!silent) {
+    setDashboardState({ loading: true });
+  }
   try {
     const [jobs, dashboard] = await Promise.all([fetchJobs(), fetchDashboard()]);
     setDashboardState({
