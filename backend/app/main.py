@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import init_db
 from app.routers import candidates, ingest, jobs, publish
-from app.services.ffmpeg_util import resolve_ffmpeg_ffprobe
+from app.services.ffmpeg_util import FFMPEG_SETUP_HINT, resolve_ffmpeg_ffprobe
 
 _log = logging.getLogger("uvicorn.error")
 
@@ -30,8 +30,8 @@ async def lifespan(app: FastAPI):
         _log.info("FFmpeg for ingest/render: %s", ff)
     else:
         _log.warning(
-            "FFmpeg/ffprobe not resolved; YouTube merge and transcoding may fail. "
-            "Install FFmpeg and set FFMPEG_PATH/FFPROBE_PATH in backend/.env."
+            "FFmpeg/ffprobe not resolved; YouTube merge and transcoding may fail. %s",
+            FFMPEG_SETUP_HINT,
         )
     await init_db()
     yield

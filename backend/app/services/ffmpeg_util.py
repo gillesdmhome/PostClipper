@@ -12,6 +12,13 @@ from app.config import settings
 # backend/ — resolve relative FFMPEG_PATH entries in .env regardless of process cwd
 _BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
 
+# Single troubleshooting pointer for logs, API warnings, and FileNotFoundError (keep in sync with README).
+FFMPEG_SETUP_HINT = (
+    "Install ffmpeg and ffprobe on the system, confirm GET /health shows ffmpeg_ok. "
+    "Details: README Prerequisites and docs/platforms.md (ffmpeg / yt-dlp). "
+    "Override: FFMPEG_PATH and FFPROBE_PATH in backend/.env."
+)
+
 
 def _abs_tool_path(p: Path) -> Path:
     p = p.expanduser()
@@ -19,12 +26,68 @@ def _abs_tool_path(p: Path) -> Path:
 
 
 def _ffmpeg_tool_help() -> str:
-    return (
-        "FFmpeg/ffprobe not found. Set FFMPEG_PATH and FFPROBE_PATH in backend/.env to the full paths "
-        "of ffmpeg.exe and ffprobe.exe (same folder is fine), or install FFmpeg and restart the app "
-        "from a terminal where `ffmpeg` works. On Windows, winget installs under "
-        "%LOCALAPPDATA%\\Microsoft\\WinGet\\Packages\\…\\bin\\."
-    )
+    return f"FFmpeg/ffprobe not found. {FFMPEG_SETUP_HINT}"
+
+
+def _windows_registry_path_directories() -> list[Path]:
+    """
+    PATH as stored in the registry (system then user). IDE-launched Python often inherits a minimal PATH;
+    this matches what Explorer/cmd get after winget adds FFmpeg to the user PATH.
+    """
+    import winreg
+
+    dirs: list[Path] = []
+
+    def append_from_key(hive: int, subpath: str) -> None:
+        try:
+            with winreg.OpenKey(hive, subpath) as key:
+                val, _ = winreg.QueryValueEx(key, "Path")
+        except OSError:
+            return
+        if not val or not isinstance(val, str):
+            return
+        for segment in val.split(";"):
+            expanded = os.path.expandvars(segment.strip())
+            if not expanded:
+                continue
+            try:
+                p = Path(expanded).resolve()
+                if p.is_dir():
+                    dirs.append(p)
+            except OSError:
+                continue
+
+    # Windows merges PATH as system directories first, then user (see MS docs on user path).
+    append_from_key(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment")
+    append_from_key(winreg.HKEY_CURRENT_USER, r"Environment")
+    return dirs
+
+
+def _find_exe_in_directories(directories: list[Path], name: str) -> Path | None:
+    for d in directories:
+        cand = d / name
+        try:
+            if cand.is_file():
+                return cand.resolve()
+        except OSError:
+            continue
+    return None
+
+
+def _probe_name() -> str:
+    return "ffprobe.exe" if sys.platform == "win32" else "ffprobe"
+
+
+def _resolved_ffprobe_sibling(ffmpeg_path: str) -> str | None:
+    """ffprobe lives next to ffmpeg; resolve symlinks (e.g. WinGet Links\\ffmpeg.exe → real bin)."""
+    try:
+        parent = Path(ffmpeg_path).resolve(strict=False).parent
+        sib = parent / _probe_name()
+        if sib.is_file():
+            return str(sib.resolve())
+    except OSError:
+        pass
+    return None
 
 
 def _iter_windows_ffmpeg_exes() -> list[Path]:
@@ -37,39 +100,89 @@ def _iter_windows_ffmpeg_exes() -> list[Path]:
             found.append(link)
         pkgs = Path(local) / "Microsoft" / "WinGet" / "Packages"
         if pkgs.is_dir():
-            for d in pkgs.iterdir():
-                du = d.name.upper()
-                if "FFMPEG" in du and "GYAN" in du:
-                    for p in d.rglob("ffmpeg.exe"):
-                        found.append(p)
-                        break
+            try:
+                for d in pkgs.iterdir():
+                    if not d.is_dir():
+                        continue
+                    # Any winget FFmpeg package (Gyan, BtbN, etc.) — folder name contains FFMPEG.
+                    if "FFMPEG" not in d.name.upper():
+                        continue
+                    try:
+                        for p in d.rglob("ffmpeg.exe"):
+                            found.append(p)
+                            break
+                    except OSError:
+                        continue
+            except OSError:
+                pass
     pf = os.environ.get("ProgramFiles", r"C:\Program Files")
     pffb = Path(pf) / "ffmpeg" / "bin" / "ffmpeg.exe"
     if pffb.is_file():
         found.append(pffb)
+    # Common manual zip layout (installer usually matches ProgramFiles\ffmpeg\bin above)
+    c_ffmpeg = Path(r"C:\ffmpeg\bin\ffmpeg.exe")
+    if c_ffmpeg.is_file():
+        found.append(c_ffmpeg)
     # Scoop default layout
     profile = os.environ.get("USERPROFILE", "")
     if profile:
         scoop = Path(profile) / "scoop" / "apps" / "ffmpeg" / "current" / "bin" / "ffmpeg.exe"
         if scoop.is_file():
             found.append(scoop)
-    # Chocolatey shim / portable
-    choco_bin = Path(os.environ.get("ChocolateyInstall", r"C:\ProgramData\chocolatey")) / "bin" / "ffmpeg.exe"
+    choco = Path(os.environ.get("ChocolateyInstall", r"C:\ProgramData\chocolatey"))
+    choco_bin = choco / "bin" / "ffmpeg.exe"
     if choco_bin.is_file():
         found.append(choco_bin)
+    for rel in (
+        "lib/ffmpeg/tools/ffmpeg/bin/ffmpeg.exe",
+        "lib/ffmpeg-full/tools/ffmpeg/bin/ffmpeg.exe",
+    ):
+        p = choco / rel
+        if p.is_file():
+            found.append(p)
     # De-dupe by resolved path while preserving order
     seen: set[str] = set()
     out: list[Path] = []
+    probe = _probe_name()
     for p in found:
-        key = str(p.resolve())
+        try:
+            key = str(p.resolve())
+        except OSError:
+            continue
         if key not in seen:
             seen.add(key)
             out.append(p)
-    return out
+    # Drop candidates with no ffprobe beside resolved ffmpeg (WinGet Links symlinks, stray copies).
+    paired: list[Path] = []
+    for p in out:
+        try:
+            rp = p.resolve(strict=False)
+            if (rp.parent / probe).is_file():
+                paired.append(p)
+        except OSError:
+            continue
+    return paired if paired else out
 
 
-def _probe_name() -> str:
-    return "ffprobe.exe" if sys.platform == "win32" else "ffprobe"
+def _resolve_from_unix_common_bins() -> tuple[str | None, str | None]:
+    """When PATH is minimal (e.g. IDE on macOS), Homebrew paths are often missing."""
+    if sys.platform == "win32":
+        return None, None
+    ff: str | None = None
+    fp: str | None = None
+    for d in (Path("/opt/homebrew/bin"), Path("/usr/local/bin")):
+        if not d.is_dir():
+            continue
+        try:
+            ff_c = d / "ffmpeg"
+            fp_c = d / "ffprobe"
+            if ff is None and ff_c.is_file():
+                ff = str(ff_c.resolve())
+            if fp is None and fp_c.is_file():
+                fp = str(fp_c.resolve())
+        except OSError:
+            continue
+    return ff, fp
 
 
 def resolve_ffmpeg_ffprobe() -> tuple[str | None, str | None]:
@@ -96,23 +209,46 @@ def resolve_ffmpeg_ffprobe() -> tuple[str | None, str | None]:
         if w:
             fp = w
 
+    if sys.platform != "win32" and (ff is None or fp is None):
+        uff, ufp = _resolve_from_unix_common_bins()
+        if ff is None and uff:
+            ff = uff
+        if fp is None and ufp:
+            fp = ufp
+
+    # Windows: PATH in the registry (winget/user installs) is often missing from IDE-inherited env.
+    if sys.platform == "win32":
+        reg_dirs = _windows_registry_path_directories()
+        if ff is None:
+            reg_ff = _find_exe_in_directories(reg_dirs, "ffmpeg.exe")
+            if reg_ff is not None:
+                ff = str(reg_ff)
+        if fp is None:
+            reg_fp = _find_exe_in_directories(reg_dirs, "ffprobe.exe")
+            if reg_fp is not None:
+                fp = str(reg_fp)
+
     if ff is None and sys.platform == "win32":
         for p in _iter_windows_ffmpeg_exes():
-            ff = str(p.resolve())
+            ff = str(p.resolve(strict=False))
             break
 
     if fp is None and ff is not None:
-        sibling = Path(ff).parent / _probe_name()
-        if sibling.is_file():
-            fp = str(sibling.resolve())
+        sib = _resolved_ffprobe_sibling(ff)
+        if sib:
+            fp = sib
 
     if fp is None and sys.platform == "win32":
         for p in _iter_windows_ffmpeg_exes():
-            sib = p.parent / _probe_name()
-            if sib.is_file():
-                fp = str(sib.resolve())
+            try:
+                rp = str(p.resolve(strict=False))
+            except OSError:
+                continue
+            sib = _resolved_ffprobe_sibling(rp)
+            if sib:
+                fp = sib
                 if ff is None:
-                    ff = str(p.resolve())
+                    ff = rp
                 break
 
     return ff, fp

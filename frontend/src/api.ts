@@ -72,13 +72,13 @@ export type Dashboard = {
 };
 
 export const ingestYoutube = (url: string) =>
-  api<{ job_id: string }>("/api/ingest/youtube", {
+  api<{ job_id: string; status: string }>("/api/ingest/youtube", {
     method: "POST",
     body: JSON.stringify({ url }),
   });
 
 export const ingestTwitch = (url: string) =>
-  api<{ job_id: string }>("/api/ingest/twitch", {
+  api<{ job_id: string; status: string }>("/api/ingest/twitch", {
     method: "POST",
     body: JSON.stringify({ url }),
   });
@@ -136,11 +136,11 @@ export const suggestAlternative = (id: string) =>
 export async function uploadRecordingWithProgress(
   file: File,
   onProgress?: (percent: number, loaded: number, total: number) => void
-): Promise<{ job_id: string }> {
+): Promise<{ job_id: string; status: string }> {
   const fd = new FormData();
   fd.append("file", file);
 
-  return new Promise<{ job_id: string }>((resolve, reject) => {
+  return new Promise<{ job_id: string; status: string }>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
 
     xhr.open("POST", "/api/ingest/upload");
@@ -162,7 +162,7 @@ export async function uploadRecordingWithProgress(
         return;
       }
       try {
-        const json = JSON.parse(xhr.responseText) as { job_id: string };
+        const json = JSON.parse(xhr.responseText) as { job_id: string; status: string };
         resolve(json);
       } catch (e) {
         reject(new Error("Upload succeeded but response was not valid JSON"));
@@ -173,7 +173,7 @@ export async function uploadRecordingWithProgress(
   });
 }
 
-export function uploadRecording(file: File): Promise<{ job_id: string }> {
+export function uploadRecording(file: File): Promise<{ job_id: string; status: string }> {
   return uploadRecordingWithProgress(file);
 }
 

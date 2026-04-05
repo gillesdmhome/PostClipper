@@ -12,7 +12,7 @@ if ($local) {
     $pkgs = Join-Path $local "Microsoft\WinGet\Packages"
     if (Test-Path -LiteralPath $pkgs) {
         Get-ChildItem -LiteralPath $pkgs -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-            if ($_.Name -match "Gyan.*FFmpeg|FFmpeg.*Gyan") {
+            if ($_.Name -match "FFmpeg") {
                 $ff = Get-ChildItem -LiteralPath $_.FullName -Recurse -Filter "ffmpeg.exe" -ErrorAction SilentlyContinue |
                     Select-Object -First 1
                 if ($ff) { $candidates += $ff.FullName }

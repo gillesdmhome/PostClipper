@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import ClipReviewGrid from "../components/ClipReviewGrid";
+import JobStatusProgress from "../components/JobStatusProgress";
 import { generateClips, renderDrafts, suggestClips, transcribe } from "../api";
 import { useJobDetail, refreshJobDetail } from "../state/jobsStore";
 
@@ -56,17 +57,6 @@ export default function JobDetail() {
 
   const proxySrc = `/api/jobs/${id}/media/proxy`;
 
-  const stageOrder: Array<{ key: string; label: string }> = [
-    { key: "ingesting", label: "Ingest" },
-    { key: "ingested", label: "Ingested" },
-    { key: "transcribing", label: "Transcribe" },
-    { key: "transcribed", label: "Transcribed" },
-    { key: "suggesting", label: "Suggest" },
-    { key: "suggested", label: "Suggested" },
-    { key: "rendering", label: "Render" },
-    { key: "rendered", label: "Ready" },
-  ];
-
   const status = data.job.status;
 
   return (
@@ -87,41 +77,7 @@ export default function JobDetail() {
             </>
           )}
         </p>
-        <div style={{ margin: "0.25rem 0 0.75rem", fontSize: "0.8rem", color: "#475569" }}>
-          <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-            {stageOrder.map((s, idx) => {
-              const isActive = status === s.key;
-              const isDone =
-                status === "failed"
-                  ? false
-                  : stageOrder.findIndex((st) => st.key === status) >= idx &&
-                    !["failed"].includes(status);
-              return (
-                <div
-                  key={s.key}
-                  className={
-                    isActive ? "stage-pill stage-pill-active" : isDone ? "stage-pill stage-pill-done" : "stage-pill"
-                  }
-                >
-                  {s.label}
-                </div>
-              );
-            })}
-          </div>
-          {status === "pending" || status === "ingesting" ? (
-            <p style={{ margin: "0.5rem 0 0" }}>
-              Ingesting source… large VODs can take a while before transcription starts.
-            </p>
-          ) : status === "transcribing" ? (
-            <p style={{ margin: "0.5rem 0 0" }}>Transcribing audio to text. Longer videos will stay here for a bit.</p>
-          ) : status === "suggesting" ? (
-            <p style={{ margin: "0.5rem 0 0" }}>Finding the most interesting moments for clips…</p>
-          ) : status === "rendering" ? (
-            <p style={{ margin: "0.5rem 0 0" }}>Rendering vertical drafts with captions.</p>
-          ) : status === "rendered" ? (
-            <p style={{ margin: "0.5rem 0 0" }}>Drafts ready below – review and publish your favorites.</p>
-          ) : null}
-        </div>
+        <JobStatusProgress status={status} variant="full" />
         {data.job.error_message && <p style={{ color: "crimson" }}>{data.job.error_message}</p>}
         {msg && <p style={{ color: "#15803d" }}>{msg}</p>}
         {err && <p style={{ color: "crimson" }}>{err}</p>}
