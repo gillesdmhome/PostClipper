@@ -155,6 +155,33 @@ def build_clip_caption_lines(
     return out
 
 
+def fallback_context_line_from_transcript(
+    segments: list[dict[str, Any]],
+    clip_start: float,
+    clip_end: float,
+    *,
+    max_chars: int = 120,
+) -> str:
+    """
+    One contextual line from speech overlapping the clip (not timed subtitles).
+    Used when hook_text is empty so the letterbox bar still has copy.
+    """
+    parts: list[str] = []
+    for seg in segments:
+        s0, s1 = float(seg["start"]), float(seg["end"])
+        if s1 <= clip_start or s0 >= clip_end:
+            continue
+        t = str(seg.get("text", "")).strip()
+        if t:
+            parts.append(t)
+    blob = " ".join(parts).strip()
+    if not blob:
+        return ""
+    if len(blob) <= max_chars:
+        return blob
+    return blob[: max_chars - 1].rstrip() + "…"
+
+
 def segment_fallback_lines(
     segments: list[dict[str, Any]], clip_start: float, clip_end: float
 ) -> List[Tuple[float, float, str]]:

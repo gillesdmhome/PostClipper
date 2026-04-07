@@ -2,6 +2,10 @@ backend/.venv/
 backend/data/
 frontend/node_modules/
 frontend/dist/
+node_modules/
+.trigger/
 __pycache__/
 *.pyc
-.env
+# Local backend overrides (optional); repository root `.env` is the shared template.
+backend/.env
+.env.local

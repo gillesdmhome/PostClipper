@@ -1,19 +1,11 @@
-# --- System requirements (not installable via pip) ---
-# ffmpeg + ffprobe must be on the host PATH or discoverable (see README Prerequisites,
-# docs/platforms.md § ffmpeg / yt-dlp). Verify after starting the API: GET /health -> ffmpeg_ok.
-# --- Python dependencies ---
-fastapi==0.115.6
-uvicorn[standard]==0.32.1
-python-multipart==0.0.17
-sqlalchemy>=2.0.45,<3
-aiosqlite==0.20.0
-httpx==0.28.1
-pydantic-settings==2.6.1
-# yt-dlp: keep reasonably current for YouTube; `pip install -U yt-dlp` if downloads break.
-yt-dlp>=2025.10.14
-
-# Optional ASR (install separately if GPU/CPU ok):
-# faster-whisper>=1.0.0
-
-# Optional YouTube upload:
-# google-api-python-client google-auth-oauthlib google-auth-httplib2
+# Full local Python venv: same packages as the Docker video worker (API + yt-dlp).
+# Chain: this file -> requirements-worker.txt -> requirements-api.txt + yt-dlp
+#
+# Install surfaces:
+#   pip install -r requirements.txt          # recommended local dev (one venv)
+#   pip install -r requirements-api.txt    # website API only (Dockerfile.api)
+#   pip install -r requirements-worker.txt # video worker / Dockerfile.worker
+#
+# System binaries (local dev, not inside slim API container):
+#   ffmpeg + ffprobe on PATH for ingest/render (worker). Optional ML: pip install -r requirements-ml.txt
+-r requirements-worker.txt

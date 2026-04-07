@@ -117,11 +117,11 @@ export default function Dashboard() {
     <>
       {dash && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Dashboard</h2>
+          <h2>Dashboard</h2>
           <p>
             <strong>{dash.total_jobs}</strong> jobs · <strong>{dash.failed_jobs}</strong> failed
           </p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <div className="flex-gap-sm" style={{ marginTop: 8 }}>
             {Object.entries(dash.by_status).map(([k, v]) => (
               <span
                 key={k}
@@ -129,8 +129,8 @@ export default function Dashboard() {
                   k === "failed"
                     ? "badge status-badge status-failed"
                     : k === "rendered"
-                    ? "badge status-badge status-done"
-                    : "badge status-badge"
+                      ? "badge status-badge status-done"
+                      : "badge status-badge"
                 }
               >
                 {k}: {v}
@@ -141,28 +141,28 @@ export default function Dashboard() {
       )}
       {!dash && (
         <div className="card">
-          <h2 style={{ marginTop: 0 }}>Dashboard</h2>
-          <p style={{ color: "#64748b", fontSize: "0.9rem" }}>
+          <h2>Dashboard</h2>
+          <p className="text-muted text-small">
             {loading ? "Loading jobs summary…" : "No jobs yet — start a new ingest below."}
           </p>
         </div>
       )}
 
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>New ingest</h2>
-        {(err || error) && <p style={{ color: "crimson" }}>{err ?? error}</p>}
-        <form onSubmit={onYoutube} style={{ marginBottom: 12 }}>
+        <h2>New ingest</h2>
+        {(err || error) && <p className="text-error">{err ?? error}</p>}
+        <form onSubmit={onYoutube} className="form-stack">
           <label>YouTube VOD URL</label>
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <div className="form-inline">
             <input value={yt} onChange={(e) => setYt(e.target.value)} placeholder="https://..." />
             <button type="submit" className={`primary${busy ? " btn-loading" : ""}`} disabled={busy}>
               {busy ? "Starting…" : "Start"}
             </button>
           </div>
         </form>
-        <form onSubmit={onTwitch} style={{ marginBottom: 12 }}>
+        <form onSubmit={onTwitch} className="form-stack">
           <label>Twitch VOD URL</label>
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <div className="form-inline">
             <input value={tw} onChange={(e) => setTw(e.target.value)} placeholder="https://..." />
             <button type="submit" className={`primary${busy ? " btn-loading" : ""}`} disabled={busy}>
               {busy ? "Starting…" : "Start"}
@@ -173,8 +173,8 @@ export default function Dashboard() {
           <label>Zoom / podcast file</label>
           <input type="file" accept="video/*,audio/*" onChange={onFileChange} disabled={busy} style={{ marginTop: 4 }} />
           {uploadPct !== null && (
-            <div style={{ marginTop: 8 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "0.78rem", color: "#475569" }}>
+            <div className="mt-sm">
+              <div className="progress-row text-xs text-muted">
                 <span>Uploading file…</span>
                 <span>{uploadPct}%</span>
               </div>
@@ -187,8 +187,8 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Jobs</h2>
-        <p style={{ color: "#64748b", fontSize: "0.88rem", marginTop: 0 }}>
+        <h2>Jobs</h2>
+        <p className="text-muted text-small" style={{ marginTop: "0.35rem", marginBottom: "0.75rem" }}>
           In-progress jobs stay here with live status. Open the job page once clips are <strong>ready</strong> or the run{" "}
           <strong>failed</strong> (to review errors and logs).
         </p>
@@ -200,27 +200,27 @@ export default function Dashboard() {
               <th>Status</th>
               <th>Progress</th>
               <th>Duration</th>
-              <th></th>
+              <th />
             </tr>
           </thead>
           <tbody>
             {loading && jobs.length === 0 && (
               <tr>
-                <td colSpan={6} style={{ padding: "0.75rem", color: "#64748b" }}>
+                <td colSpan={6} className="text-muted" style={{ padding: "0.75rem" }}>
                   Loading jobs…
                 </td>
               </tr>
             )}
             {!loading && jobs.length === 0 && (
               <tr>
-                <td colSpan={6} style={{ padding: "0.75rem", color: "#64748b" }}>
+                <td colSpan={6} className="text-muted" style={{ padding: "0.75rem" }}>
                   No jobs yet — start a new ingest above.
                 </td>
               </tr>
             )}
             {jobs.map((j) => (
               <tr key={j.id}>
-                <td style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{j.id.slice(0, 8)}…</td>
+                <td className="mono text-xs">{j.id.slice(0, 8)}…</td>
                 <td>{j.source_type}</td>
                 <td>
                   <span className={j.status === "failed" ? "badge failed" : "badge"}>{j.status}</span>
@@ -230,20 +230,24 @@ export default function Dashboard() {
                 </td>
                 <td>{j.duration_seconds != null ? `${j.duration_seconds.toFixed(1)}s` : "—"}</td>
                 <td>
-                  {jobIsTerminalForDetail(j.status) ? (
-                    <Link to={`/job/${j.id}`}>Open</Link>
-                  ) : j.mezzanine_path ? (
-                    <button
-                      type="button"
-                      className={`primary${generatingJobId === j.id ? " btn-loading" : ""}`}
-                      disabled={generatingJobId !== null}
-                      onClick={() => onGenerateClips(j.id)}
-                    >
-                      {generatingJobId === j.id ? "Starting…" : "Generate clips"}
-                    </button>
-                  ) : (
-                    <span style={{ color: "#94a3b8", fontSize: "0.8rem" }}>Wait for ingest</span>
-                  )}
+                  <div className="table-actions">
+                    <Link to={`/job/${j.id}`} className="link-as-button">
+                      Open job
+                    </Link>
+                    {!jobIsTerminalForDetail(j.status) && j.mezzanine_path ? (
+                      <button
+                        type="button"
+                        className={`primary${generatingJobId === j.id ? " btn-loading" : ""}`}
+                        disabled={generatingJobId !== null}
+                        onClick={() => onGenerateClips(j.id)}
+                      >
+                        {generatingJobId === j.id ? "Starting…" : "Generate clips"}
+                      </button>
+                    ) : null}
+                    {!jobIsTerminalForDetail(j.status) && !j.mezzanine_path ? (
+                      <span className="text-faint text-xs">Generate after ingest</span>
+                    ) : null}
+                  </div>
                 </td>
               </tr>
             ))}

@@ -1,0 +1,3 @@
+# Video processing worker: API deps + yt-dlp (FFmpeg must be on PATH or via FFMPEG_PATH).
+-r requirements-api.txt
+yt-dlp>=2025.10.14

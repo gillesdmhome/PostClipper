@@ -58,14 +58,17 @@ async def run_youtube_ingest(job_id: str, url: str):
             await session.commit()
 
         dirs = ensure_dirs(job_id)
-        ok, path, err = download_with_ytdlp(url, dirs["raw"], "source")
+        # yt-dlp / FFmpeg are synchronous; never run them on the asyncio loop — that stalls every
+        # concurrent request on this process (e.g. GET /api/jobs/{id}) when REDIS_URL is unset and
+        # FastAPI BackgroundTasks runs this coroutine on the API worker.
+        ok, path, err = await asyncio.to_thread(download_with_ytdlp, url, dirs["raw"], "source")
         if not ok or not path:
             async with async_session_maker() as session:
                 await _set_job_failed(session, job_id, err or "download failed")
                 await session.commit()
             return
 
-        ok2, err2, meta = ingest_pipeline(job_id, path)
+        ok2, err2, meta = await asyncio.to_thread(ingest_pipeline, job_id, path)
         async with async_session_maker() as session:
             if not ok2:
                 await _set_job_failed(session, job_id, err2)
@@ -97,14 +100,14 @@ async def run_twitch_ingest(job_id: str, url: str):
             await session.commit()
 
         dirs = ensure_dirs(job_id)
-        ok, path, err = download_with_ytdlp(url, dirs["raw"], "source")
+        ok, path, err = await asyncio.to_thread(download_with_ytdlp, url, dirs["raw"], "source")
         if not ok or not path:
             async with async_session_maker() as session:
                 await _set_job_failed(session, job_id, err or "download failed")
                 await session.commit()
             return
 
-        ok2, err2, meta = ingest_pipeline(job_id, path)
+        ok2, err2, meta = await asyncio.to_thread(ingest_pipeline, job_id, path)
         async with async_session_maker() as session:
             if not ok2:
                 await _set_job_failed(session, job_id, err2)
@@ -125,8 +128,8 @@ async def run_twitch_ingest(job_id: str, url: str):
 
 
 async def run_upload_ingest(job_id: str, saved_path: str):
-    async with async_session_maker() as session:
-        try:
+    try:
+        async with async_session_maker() as session:
             job = await session.get(Job, job_id)
             if not job:
                 return
@@ -135,24 +138,25 @@ async def run_upload_ingest(job_id: str, saved_path: str):
             await add_log(session, job_id, f"Upload ingest: {saved_path}")
             await session.commit()
 
-            ok2, err2, meta = ingest_pipeline(job_id, Path(saved_path))
+        ok2, err2, meta = await asyncio.to_thread(ingest_pipeline, job_id, Path(saved_path))
+        async with async_session_maker() as session:
             job = await session.get(Job, job_id)
+            if not job:
+                return
             if not ok2:
                 await _set_job_failed(session, job_id, err2)
                 await session.commit()
                 return
-
             job.mezzanine_path = meta["mezzanine_path"]
             job.proxy_path = meta["proxy_path"]
             job.duration_seconds = meta.get("duration_seconds")
             job.status = JobStatus.ingested.value
             await add_log(session, job_id, "Ingest complete; mezzanine ready")
             await session.commit()
-        except Exception as e:
-            await session.rollback()
-            async with async_session_maker() as s2:
-                await _set_job_failed(s2, job_id, str(e))
-                await s2.commit()
+    except Exception as e:
+        async with async_session_maker() as s2:
+            await _set_job_failed(s2, job_id, str(e))
+            await s2.commit()
 
 
 async def run_transcribe(job_id: str):
@@ -269,7 +273,7 @@ async def _run_render_drafts_impl(job_id: str):
             )
             tr = q.scalar_one_or_none()
             if not tr or not tr.segments:
-                await _set_job_failed(session, job_id, "No transcript; cannot render captions")
+                await _set_job_failed(session, job_id, "No transcript; cannot render drafts")
                 await session.commit()
                 return
 
@@ -286,12 +290,15 @@ async def _run_render_drafts_impl(job_id: str):
 
             # Detach ORM rows so a concurrent suggest pass cannot leave stale instances that flush
             # UPDATEs against deleted PKs (StaleDataError: 0 rows matched).
-            plan = [(c.id, float(c.start_sec), float(c.end_sec)) for c in candidates]
+            plan = [
+                (c.id, float(c.start_sec), float(c.end_sec), c.hook_text, c.suggested_title)
+                for c in candidates
+            ]
             for c in candidates:
                 session.expunge(c)
 
             job.status = JobStatus.rendering.value
-            await add_log(session, job_id, f"Rendering {len(plan)} drafts")
+            await add_log(session, job_id, f"Rendering {len(plan)} drafts (letterbox context captions)")
             await session.commit()
 
             fallback_segs = [
@@ -299,7 +306,7 @@ async def _run_render_drafts_impl(job_id: str):
                 for s in tr.segments
             ]
             segments = merge_segments_from_storage(tr.raw_json_path, fallback_segs)
-            for cid, start_sec, end_sec in plan:
+            for cid, start_sec, end_sec, hook_text, suggested_title in plan:
                 out_name = f"draft_{cid[:8]}.mp4"
                 ok, err, path = render_vertical_clip(
                     job_id,
@@ -308,6 +315,8 @@ async def _run_render_drafts_impl(job_id: str):
                     end_sec,
                     segments,
                     out_name,
+                    hook_text=hook_text,
+                    suggested_title=suggested_title,
                 )
                 if not ok:
                     await add_log(session, job_id, f"Render failed for candidate {cid}: {err}", "error")
@@ -418,6 +427,8 @@ async def run_suggest_alternative(old_candidate_id: str) -> None:
             s0["end_sec"],
             merged,
             out_name,
+            hook_text=s0.get("hook_text"),
+            suggested_title=s0.get("suggested_title"),
         )
         async with async_session_maker() as s_up:
             nc = await s_up.get(ClipCandidate, new_id)

@@ -12,12 +12,12 @@ type Filter = "all" | "pending" | "accepted" | "rejected";
 function statusBadge(status: string) {
   const s = status || "pending";
   if (s === "accepted") {
-    return <span className="badge" style={{ background: "#bbf7d0", color: "#14532d" }}>Accepted</span>;
+    return <span className="badge badge-review-accepted">Accepted</span>;
   }
   if (s === "rejected") {
-    return <span className="badge" style={{ background: "#fecaca", color: "#991b1b" }}>Rejected</span>;
+    return <span className="badge badge-review-rejected">Rejected</span>;
   }
-  return <span className="badge" style={{ background: "#e0e7ff", color: "#3730a3" }}>Pending review</span>;
+  return <span className="badge badge-review-pending">Pending review</span>;
 }
 
 export default function ClipReviewGrid({
@@ -87,7 +87,7 @@ export default function ClipReviewGrid({
 
   if (candidates.length === 0) {
     return (
-      <p style={{ color: "#64748b" }}>
+      <p className="text-muted text-small">
         No candidates yet — use &quot;Generate suggested clips &amp; drafts&quot; after ingest completes.
       </p>
     );
@@ -95,75 +95,44 @@ export default function ClipReviewGrid({
 
   return (
     <div>
-      <p style={{ color: "#475569", marginTop: 0, fontSize: "0.95rem" }}>
+      <p className="text-muted text-small" style={{ marginTop: 0, marginBottom: "0.75rem" }}>
         Preview each draft, then <strong>Accept</strong> to keep it for publishing, <strong>Reject</strong> to dismiss, or{" "}
         <strong>Suggest another clip</strong> to replace it with a different time range (auto-rendered).
       </p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 16 }}>
-        <span style={{ fontWeight: 600 }}>Show:</span>
+      <div className="filter-row">
+        <span className="filter-row-label">Show</span>
         {(["all", "pending", "accepted", "rejected"] as const).map((f) => (
           <button
             key={f}
             type="button"
             onClick={() => setFilter(f)}
             className={filter === f ? "primary" : undefined}
-            style={filter === f ? {} : { opacity: 0.85 }}
           >
             {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
       </div>
-      {err && <p style={{ color: "crimson", marginBottom: 8 }}>{err}</p>}
+      {err && <p className="text-error" style={{ marginBottom: 8 }}>{err}</p>}
 
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-          gap: "1rem",
-        }}
-      >
+      <div className="clip-grid">
         {filtered.map((c) => {
           const rs = c.review_status || "pending";
           const draftSrc = c.draft_video_path != null ? `/api/candidates/${c.id}/media/draft` : null;
           const isBusy = busy === c.id;
 
+          const cardMod =
+            rs === "accepted" ? " clip-card--accepted" : rs === "rejected" ? " clip-card--rejected" : "";
+
           return (
-            <div
-              key={c.id}
-              className="card"
-              style={{
-                margin: 0,
-                display: "flex",
-                flexDirection: "column",
-                opacity: rs === "rejected" ? 0.75 : 1,
-                border:
-                  rs === "accepted"
-                    ? "2px solid #22c55e"
-                    : rs === "rejected"
-                      ? "1px solid #fecaca"
-                      : "1px solid #e2e8f0",
-              }}
-            >
+            <div key={c.id} className={`card clip-card${cardMod}`}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
-                <div style={{ fontSize: "0.8rem", fontFamily: "monospace", color: "#64748b" }}>
+                <div className="mono text-xs text-muted">
                   {c.start_sec.toFixed(1)}s – {c.end_sec.toFixed(1)}s
                 </div>
                 {statusBadge(rs)}
               </div>
 
-              <div
-                style={{
-                  aspectRatio: "9/16",
-                  maxHeight: 320,
-                  background: "#0f172a",
-                  borderRadius: 8,
-                  overflow: "hidden",
-                  marginTop: 8,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-              >
+              <div className="clip-thumb">
                 {draftSrc ? (
                   <video
                     src={draftSrc}
@@ -172,20 +141,24 @@ export default function ClipReviewGrid({
                     style={{ width: "100%", height: "100%", objectFit: "contain" }}
                   />
                 ) : (
-                  <span style={{ color: "#94a3b8", fontSize: "0.85rem" }}>Rendering…</span>
+                  <span className="text-faint text-small">Rendering…</span>
                 )}
               </div>
 
-              <div style={{ marginTop: 10, flex: 1 }}>
-                <strong style={{ fontSize: "0.95rem", display: "block" }}>{c.suggested_title || "Untitled clip"}</strong>
-                <p style={{ fontSize: "0.85rem", color: "#475569", margin: "6px 0 0" }}>{c.hook_text || "—"}</p>
-                <div style={{ fontSize: "0.75rem", color: "#94a3b8" }}>Score: {c.score?.toFixed(2) ?? "—"}</div>
+              <div className="mt-sm" style={{ flex: 1 }}>
+                <strong className="text-small" style={{ display: "block" }}>
+                  {c.suggested_title || "Untitled clip"}
+                </strong>
+                <p className="text-muted text-small" style={{ margin: "6px 0 0" }}>
+                  {c.hook_text || "—"}
+                </p>
+                <div className="text-xs text-faint">Score: {c.score?.toFixed(2) ?? "—"}</div>
               </div>
 
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 12 }}>
+              <div className="flex-actions-col">
                 {rs === "pending" && (
                   <>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <div className="flex-gap-sm">
                       <button
                         type="button"
                         className={`primary${isBusy ? " btn-loading" : ""}`}
@@ -217,12 +190,10 @@ export default function ClipReviewGrid({
                   </>
                 )}
                 {rs === "accepted" && (
-                  <p style={{ fontSize: "0.85rem", color: "#15803d", margin: 0 }}>
-                    Accepted — use publish actions below.
-                  </p>
+                  <p className="text-success text-small mb-zero">Accepted — use publish actions below.</p>
                 )}
                 {rs === "rejected" && (
-                  <p style={{ fontSize: "0.85rem", color: "#64748b", margin: 0 }}>
+                  <p className="text-muted text-small mb-zero">
                     Dismissed. New alternatives appear as pending cards when you use &quot;Suggest another&quot;.
                   </p>
                 )}
@@ -261,9 +232,9 @@ function PublishBlock({
   }
 
   return (
-    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid #e2e8f0" }}>
-      <span style={{ fontSize: "0.8rem", fontWeight: 600, display: "block", marginBottom: 6 }}>Publish</span>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+    <div className="publish-block">
+      <span className="publish-block-title">Publish</span>
+      <div className="publish-stack">
         <button type="button" className="primary" disabled={busy || pubBusy} onClick={() => pub("youtube_shorts")}>
           YouTube Shorts
         </button>
@@ -275,7 +246,7 @@ function PublishBlock({
         </button>
       </div>
       {c.publish_jobs?.map((pj) => (
-        <div key={pj.id} style={{ fontSize: "0.75rem", marginTop: 6 }}>
+        <div key={pj.id} className="text-xs text-muted mt-sm">
           {pj.platform}: <strong>{pj.status}</strong>
           {pj.external_id ? ` (${pj.external_id})` : ""}
           {pj.status === "export_ready" && (
@@ -285,7 +256,7 @@ function PublishBlock({
               </a>
             </div>
           )}
-          {pj.error_message && <div style={{ color: "crimson" }}>{pj.error_message}</div>}
+          {pj.error_message && <div className="text-error">{pj.error_message}</div>}
         </div>
       ))}
     </div>

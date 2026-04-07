@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,13 @@ from app.bg_tasks import (
 from app.config import settings
 from app.dependencies import get_db
 from app.models import ClipCandidate, Job, JobLog, Transcript
+from app.queue_client import (
+    ARQ_TASK_GENERATE_CLIPS_PIPELINE,
+    ARQ_TASK_RENDER_DRAFTS,
+    ARQ_TASK_SUGGEST_CLIPS,
+    ARQ_TASK_TRANSCRIBE,
+    enqueue_task,
+)
 from app.schemas import ClipCandidateOut, JobDetail, JobLogOut, JobSummary, TranscriptOut
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -89,6 +96,7 @@ async def get_job(job_id: str, session: AsyncSession = Depends(get_db)):
 
 @router.post("/{job_id}/generate-clips")
 async def generate_clips_job(
+    request: Request,
     job_id: str,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
@@ -102,7 +110,13 @@ async def generate_clips_job(
         raise HTTPException(404, "Job not found")
     if not job.mezzanine_path:
         raise HTTPException(400, "Ingest not finished — wait for mezzanine")
-    background_tasks.add_task(run_generate_clips_pipeline, job_id)
+    await enqueue_task(
+        request,
+        background_tasks,
+        ARQ_TASK_GENERATE_CLIPS_PIPELINE,
+        run_generate_clips_pipeline,
+        job_id,
+    )
     return {
         "ok": True,
         "job_id": job_id,
@@ -112,6 +126,7 @@ async def generate_clips_job(
 
 @router.post("/{job_id}/transcribe")
 async def transcribe_job(
+    request: Request,
     job_id: str,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
@@ -121,12 +136,19 @@ async def transcribe_job(
         raise HTTPException(404, "Job not found")
     if not job.mezzanine_path:
         raise HTTPException(400, "Mezzanine not ready")
-    background_tasks.add_task(run_transcribe, job_id)
+    await enqueue_task(
+        request,
+        background_tasks,
+        ARQ_TASK_TRANSCRIBE,
+        run_transcribe,
+        job_id,
+    )
     return {"ok": True, "job_id": job_id}
 
 
 @router.post("/{job_id}/suggest-clips")
 async def suggest_job(
+    request: Request,
     job_id: str,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
@@ -134,12 +156,19 @@ async def suggest_job(
     job = await session.get(Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    background_tasks.add_task(run_suggest_clips, job_id)
+    await enqueue_task(
+        request,
+        background_tasks,
+        ARQ_TASK_SUGGEST_CLIPS,
+        run_suggest_clips,
+        job_id,
+    )
     return {"ok": True, "job_id": job_id}
 
 
 @router.post("/{job_id}/render")
 async def render_job(
+    request: Request,
     job_id: str,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
@@ -147,7 +176,13 @@ async def render_job(
     job = await session.get(Job, job_id)
     if not job:
         raise HTTPException(404, "Job not found")
-    background_tasks.add_task(run_render_drafts, job_id)
+    await enqueue_task(
+        request,
+        background_tasks,
+        ARQ_TASK_RENDER_DRAFTS,
+        run_render_drafts,
+        job_id,
+    )
     return {"ok": True, "job_id": job_id}
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.bg_tasks import run_publish, run_suggest_alternative
 from app.config import settings
 from app.dependencies import get_db
 from app.models import ClipCandidate
+from app.queue_client import ARQ_TASK_PUBLISH, ARQ_TASK_SUGGEST_ALTERNATIVE, enqueue_task
 from app.schemas import CandidatePatch, PublishRequest
 
 router = APIRouter(prefix="/api/candidates", tags=["candidates"])
@@ -73,6 +74,7 @@ async def reject_candidate(candidate_id: str, session: AsyncSession = Depends(ge
 
 @router.post("/{candidate_id}/suggest-alternative")
 async def suggest_alternative(
+    request: Request,
     candidate_id: str,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_db),
@@ -80,7 +82,13 @@ async def suggest_alternative(
     c = await session.get(ClipCandidate, candidate_id)
     if not c:
         raise HTTPException(404, "Candidate not found")
-    background_tasks.add_task(run_suggest_alternative, candidate_id)
+    await enqueue_task(
+        request,
+        background_tasks,
+        ARQ_TASK_SUGGEST_ALTERNATIVE,
+        run_suggest_alternative,
+        candidate_id,
+    )
     return {
         "ok": True,
         "candidate_id": candidate_id,
@@ -90,6 +98,7 @@ async def suggest_alternative(
 
 @router.post("/{candidate_id}/publish")
 async def publish_candidate(
+    request: Request,
     candidate_id: str,
     body: PublishRequest,
     background_tasks: BackgroundTasks,
@@ -98,7 +107,10 @@ async def publish_candidate(
     c = await session.get(ClipCandidate, candidate_id)
     if not c:
         raise HTTPException(404, "Candidate not found")
-    background_tasks.add_task(
+    await enqueue_task(
+        request,
+        background_tasks,
+        ARQ_TASK_PUBLISH,
         run_publish,
         candidate_id,
         body.platform,

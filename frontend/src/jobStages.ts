@@ -42,6 +42,17 @@ export function jobProgressPercent(status: string): number | null {
   return Math.round((i / last) * 100);
 }
 
+/** True while the backend is actively working (bar should look "alive"). */
+export function jobStatusIsActivelyRunning(status: string): boolean {
+  return (
+    status === "pending" ||
+    status === "ingesting" ||
+    status === "transcribing" ||
+    status === "suggesting" ||
+    status === "rendering"
+  );
+}
+
 /** Short copy for dashboard table rows. */
 export function jobStatusHintDashboard(status: string): string | null {
   switch (status) {

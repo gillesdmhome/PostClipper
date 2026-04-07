@@ -1,0 +1,12 @@
+# Website API only: no yt-dlp / heavy ingest CLIs. Use with Docker image `Dockerfile.api`.
+# For local full stack use requirements-worker.txt (or root requirements.txt).
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.17
+sqlalchemy>=2.0.45,<3
+aiosqlite==0.20.0
+asyncpg>=0.30.0
+redis>=5.0.0
+arq>=0.26.0
+httpx==0.28.1
+pydantic-settings==2.6.1
