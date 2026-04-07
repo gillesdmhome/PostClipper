@@ -20,6 +20,7 @@ ARQ_TASK_RENDER_DRAFTS = "task_render_drafts"
 ARQ_TASK_GENERATE_CLIPS_PIPELINE = "task_generate_clips_pipeline"
 ARQ_TASK_SUGGEST_ALTERNATIVE = "task_suggest_alternative"
 ARQ_TASK_PUBLISH = "task_publish"
+ARQ_TASK_REGENERATE_CAPTION = "task_regenerate_caption"
 
 
 async def enqueue_task(
@@ -31,10 +32,11 @@ async def enqueue_task(
 ) -> None:
     pool = getattr(request.app.state, "arq_pool", None)
     if settings.trigger_secret_key:
+        # Dev-friendly fallback: if Trigger is configured but Redis/Arq isn't available,
+        # run in-process rather than hard-failing basic ingest flows.
         if pool is None:
-            raise RuntimeError(
-                "TRIGGER_SECRET_KEY is set but REDIS_URL is missing; Arq pool is required for the relay."
-            )
+            background_tasks.add_task(coro, *args)
+            return
         from app.trigger_client import trigger_postclipper_relay
 
         await trigger_postclipper_relay(arq_job_name, args)

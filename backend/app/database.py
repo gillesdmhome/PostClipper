@@ -37,6 +37,17 @@ async def init_db():
     except Exception:
         pass
 
+    # SQLite only: forward-compatible additive columns (no Alembic in this repo).
+    for ddl in [
+        "ALTER TABLE clip_candidates ADD COLUMN platform VARCHAR(32) NULL",
+        "ALTER TABLE clip_candidates ADD COLUMN suggested_description TEXT NULL",
+    ]:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(ddl))
+        except Exception:
+            pass
+
 
 async def get_session():
     async with async_session_maker() as session:

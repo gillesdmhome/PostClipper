@@ -7,8 +7,8 @@ from app.services.captions import fallback_context_line_from_transcript
 from app.services.ffmpeg_util import ffmpeg_binary, run_cmd
 from app.services.ingest import ensure_dirs
 
-# Bottom black bar (px) at output height 1920 — captions live here, not over the picture.
-LETTERBOX_BOTTOM_PX = 260
+# Default bottom black bar (px) at output height 1920 — captions live here, not over the picture.
+DEFAULT_LETTERBOX_BOTTOM_PX = 260
 DEFAULT_OUTPUT_HEIGHT = 1920
 DEFAULT_OUTPUT_WIDTH = 1080
 
@@ -58,6 +58,7 @@ def letterbox_context_ass(
     duration_sec: float,
     video_width: int,
     video_height: int,
+    letterbox_bottom_px: int,
     title: Optional[str],
     hook: str,
 ) -> str:
@@ -84,7 +85,7 @@ def letterbox_context_ass(
     ]
 
     # Anchor in bottom letterbox (not over the video)
-    bar_top_y = video_height - LETTERBOX_BOTTOM_PX
+    bar_top_y = video_height - int(letterbox_bottom_px)
     cx = video_width // 2
     if title:
         cy = bar_top_y + 110
@@ -123,6 +124,7 @@ def render_vertical_clip(
     *,
     height: int = DEFAULT_OUTPUT_HEIGHT,
     width: int = DEFAULT_OUTPUT_WIDTH,
+    letterbox_bottom_px: int = DEFAULT_LETTERBOX_BOTTOM_PX,
     hook_text: Optional[str] = None,
     suggested_title: Optional[str] = None,
 ) -> Tuple[bool, str, Optional[str]]:
@@ -135,7 +137,9 @@ def render_vertical_clip(
     out.parent.mkdir(parents=True, exist_ok=True)
 
     duration = max(0.5, end_sec - start_sec)
-    content_h = height - LETTERBOX_BOTTOM_PX
+    lb = int(letterbox_bottom_px)
+    lb = max(0, min(lb, int(height * 0.35)))
+    content_h = height - lb
 
     title, hook = _compose_letterbox_text(hook_text, suggested_title, segments, start_sec, end_sec)
 
@@ -155,6 +159,7 @@ def render_vertical_clip(
             duration_sec=duration,
             video_width=width,
             video_height=height,
+            letterbox_bottom_px=lb,
             title=title,
             hook=hook,
         )

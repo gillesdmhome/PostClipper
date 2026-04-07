@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     suggest_engine: str = "heuristic"
     sentence_transformer_model: str = "all-MiniLM-L6-v2"
 
+    # Optional local LLM for captions (free/open-source): Ollama-compatible endpoint.
+    ollama_base_url: str = "http://127.0.0.1:11434"  # OLLAMA_BASE_URL
+    ollama_model: str = "qwen2.5:7b-instruct"  # OLLAMA_MODEL
+    ollama_timeout_sec: float = 20.0  # OLLAMA_TIMEOUT_SEC
+
     @field_validator("redis_url", "trigger_secret_key", "postclipper_executor_secret", mode="before")
     @classmethod
     def _empty_str_to_none(cls, v: object) -> object:

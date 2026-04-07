@@ -9,6 +9,7 @@ from arq.connections import RedisSettings
 from app.bg_tasks import (
     run_generate_clips_pipeline,
     run_publish,
+    run_regenerate_caption,
     run_render_drafts,
     run_suggest_alternative,
     run_suggest_clips,
@@ -62,6 +63,10 @@ async def task_publish(
     await run_publish(candidate_id, platform, title, description)
 
 
+async def task_regenerate_caption(ctx: dict, candidate_id: str) -> None:
+    await run_regenerate_caption(candidate_id)
+
+
 class WorkerSettings:
     functions = [
         task_youtube_ingest,
@@ -73,6 +78,7 @@ class WorkerSettings:
         task_generate_clips_pipeline,
         task_suggest_alternative,
         task_publish,
+        task_regenerate_caption,
     ]
     # Same REDIS_URL as the API; falls back to local Redis for dev (e.g. docker compose).
     redis_settings = RedisSettings.from_dsn(settings.redis_url or "redis://127.0.0.1:6379/0")

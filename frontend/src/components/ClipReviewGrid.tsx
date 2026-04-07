@@ -2,12 +2,30 @@ import { useMemo, useState } from "react";
 import type { ClipCandidate } from "../api";
 import {
   acceptCandidate,
+  patchCandidate,
   publishCandidate,
+  regenerateCaption,
   rejectCandidate,
   suggestAlternative,
 } from "../api";
 
 type Filter = "all" | "pending" | "accepted" | "rejected";
+
+function platformBadge(platform?: string | null) {
+  const p = (platform || "").trim();
+  if (!p) return null;
+  const label =
+    p === "youtube_shorts"
+      ? "Shorts"
+      : p === "instagram_reels"
+        ? "Reels"
+        : p === "tiktok"
+          ? "TikTok"
+          : p === "x"
+            ? "X"
+            : p;
+  return <span className="badge">{label}</span>;
+}
 
 function statusBadge(status: string) {
   const s = status || "pending";
@@ -28,8 +46,20 @@ export default function ClipReviewGrid({
   onRefresh: () => void;
 }) {
   const [filter, setFilter] = useState<Filter>("pending");
+  const [platformFilter, setPlatformFilter] = useState<string>("all");
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [edits, setEdits] = useState<
+    Record<
+      string,
+      {
+        suggested_title?: string;
+        hook_text?: string;
+        suggested_hashtags?: string;
+        suggested_description?: string;
+      }
+    >
+  >({});
 
   const sorted = useMemo(() => {
     const rank = (s: string) => (s === "pending" ? 0 : s === "accepted" ? 1 : 2);
@@ -42,9 +72,18 @@ export default function ClipReviewGrid({
   }, [candidates]);
 
   const filtered = useMemo(() => {
-    if (filter === "all") return sorted;
-    return sorted.filter((c) => (c.review_status || "pending") === filter);
-  }, [sorted, filter]);
+    const byStatus = filter === "all" ? sorted : sorted.filter((c) => (c.review_status || "pending") === filter);
+    if (platformFilter === "all") return byStatus;
+    return byStatus.filter((c) => (c.platform || "") === platformFilter);
+  }, [sorted, filter, platformFilter]);
+
+  const platformOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of candidates) {
+      if (c.platform) set.add(c.platform);
+    }
+    return ["all", ...Array.from(set).sort()];
+  }, [candidates]);
 
   async function onAccept(id: string) {
     setErr(null);
@@ -85,6 +124,39 @@ export default function ClipReviewGrid({
     }
   }
 
+  async function onSaveEdits(id: string) {
+    const e = edits[id];
+    if (!e) return;
+    setErr(null);
+    setBusy(id);
+    try {
+      await patchCandidate(id, {
+        suggested_title: e.suggested_title,
+        hook_text: e.hook_text,
+        suggested_hashtags: e.suggested_hashtags,
+        suggested_description: e.suggested_description,
+      });
+      onRefresh();
+    } catch (e2) {
+      setErr(String(e2));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onRegenerateCaption(id: string) {
+    setErr(null);
+    setBusy(id);
+    try {
+      await regenerateCaption(id);
+      onRefresh();
+    } catch (e2) {
+      setErr(String(e2));
+    } finally {
+      setBusy(null);
+    }
+  }
+
   if (candidates.length === 0) {
     return (
       <p className="text-muted text-small">
@@ -112,6 +184,16 @@ export default function ClipReviewGrid({
           </button>
         ))}
       </div>
+      <div className="filter-row">
+        <span className="filter-row-label">Platform</span>
+        <select value={platformFilter} onChange={(e) => setPlatformFilter(e.target.value)}>
+          {platformOptions.map((p) => (
+            <option key={p} value={p}>
+              {p === "all" ? "All" : p}
+            </option>
+          ))}
+        </select>
+      </div>
       {err && <p className="text-error" style={{ marginBottom: 8 }}>{err}</p>}
 
       <div className="clip-grid">
@@ -119,6 +201,11 @@ export default function ClipReviewGrid({
           const rs = c.review_status || "pending";
           const draftSrc = c.draft_video_path != null ? `/api/candidates/${c.id}/media/draft` : null;
           const isBusy = busy === c.id;
+          const e = edits[c.id] || {};
+          const title = e.suggested_title ?? c.suggested_title ?? "";
+          const hook = e.hook_text ?? c.hook_text ?? "";
+          const tags = e.suggested_hashtags ?? c.suggested_hashtags ?? "";
+          const desc = e.suggested_description ?? c.suggested_description ?? "";
 
           const cardMod =
             rs === "accepted" ? " clip-card--accepted" : rs === "rejected" ? " clip-card--rejected" : "";
@@ -129,7 +216,10 @@ export default function ClipReviewGrid({
                 <div className="mono text-xs text-muted">
                   {c.start_sec.toFixed(1)}s – {c.end_sec.toFixed(1)}s
                 </div>
-                {statusBadge(rs)}
+                <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                  {platformBadge(c.platform)}
+                  {statusBadge(rs)}
+                </div>
               </div>
 
               <div className="clip-thumb">
@@ -146,16 +236,62 @@ export default function ClipReviewGrid({
               </div>
 
               <div className="mt-sm" style={{ flex: 1 }}>
-                <strong className="text-small" style={{ display: "block" }}>
-                  {c.suggested_title || "Untitled clip"}
-                </strong>
-                <p className="text-muted text-small" style={{ margin: "6px 0 0" }}>
-                  {c.hook_text || "—"}
-                </p>
+                <label className="text-xs text-muted" style={{ display: "block", marginTop: 6 }}>
+                  Title
+                </label>
+                <input
+                  value={title}
+                  onChange={(ev) =>
+                    setEdits((prev) => ({ ...prev, [c.id]: { ...prev[c.id], suggested_title: ev.target.value } }))
+                  }
+                />
+                <label className="text-xs text-muted" style={{ display: "block", marginTop: 8 }}>
+                  Letterbox caption
+                </label>
+                <textarea
+                  rows={3}
+                  value={hook}
+                  onChange={(ev) =>
+                    setEdits((prev) => ({ ...prev, [c.id]: { ...prev[c.id], hook_text: ev.target.value } }))
+                  }
+                />
+                <label className="text-xs text-muted" style={{ display: "block", marginTop: 8 }}>
+                  Hashtags
+                </label>
+                <input
+                  value={tags}
+                  onChange={(ev) =>
+                    setEdits((prev) => ({ ...prev, [c.id]: { ...prev[c.id], suggested_hashtags: ev.target.value } }))
+                  }
+                />
+                <label className="text-xs text-muted" style={{ display: "block", marginTop: 8 }}>
+                  Description
+                </label>
+                <textarea
+                  rows={2}
+                  value={desc}
+                  onChange={(ev) =>
+                    setEdits((prev) => ({ ...prev, [c.id]: { ...prev[c.id], suggested_description: ev.target.value } }))
+                  }
+                />
                 <div className="text-xs text-faint">Score: {c.score?.toFixed(2) ?? "—"}</div>
               </div>
 
               <div className="flex-actions-col">
+                <div className="flex-gap-sm">
+                  <button type="button" disabled={isBusy} className={isBusy ? "btn-loading" : undefined} onClick={() => onSaveEdits(c.id)}>
+                    {isBusy ? "Saving…" : "Save edits"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isBusy}
+                    className={isBusy ? "btn-loading" : undefined}
+                    onClick={() => onRegenerateCaption(c.id)}
+                    title="Regenerates caption text and re-renders the draft"
+                  >
+                    {isBusy ? "Queuing…" : "Regenerate caption"}
+                  </button>
+                </div>
                 {rs === "pending" && (
                   <>
                     <div className="flex-gap-sm">

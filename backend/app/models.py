@@ -95,9 +95,11 @@ class ClipCandidate(Base):
     start_sec: Mapped[float] = mapped_column(Float)
     end_sec: Mapped[float] = mapped_column(Float)
     score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    platform: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     hook_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     suggested_title: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     suggested_hashtags: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    suggested_description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     caption_overlay_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     draft_video_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
     approved: Mapped[int] = mapped_column(Integer, default=0)  # 0 draft 1 approved for publish
