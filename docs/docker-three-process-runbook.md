@@ -1,16 +1,16 @@
-# Runbook: three-process stack with Docker
+# Runbook: full stack with Docker
 
-This document lists **every step** to run PostClipper as **frontend (host) + website API (container) + video worker (container)**, with Redis and Postgres from Compose.
+This document lists **every step** to run PostClipper with **Compose**: **web UI (nginx + static build)**, **website API**, **video worker**, **Redis**, and **Postgres**. You can still run the **frontend on the host** with Vite for hot reload (see Step 3).
 
 ## What you are running
 
-| # | Process | How (this runbook) |
+| # | Process | How (default Compose) |
 |---|---------|-------------------|
-| 1 | **Frontend** | Node on your machine — `npm run dev` in `frontend/` |
-| 2 | **Website API** | Docker service `api` — FastAPI on port **8000** |
-| 3 | **Video worker** | Docker service `worker` — Arq, FFmpeg, yt-dlp |
-| + | **Redis** | Docker service `redis` — job queue |
-| + | **Postgres** | Docker service `postgres` — database (required for multi-container; SQLite is not shared across containers) |
+| 1 | **Frontend UI** | Docker service **`web`** — nginx on host port **5173**, proxies `/api` to **`api`** |
+| 2 | **Website API** | Docker service **`api`** — FastAPI on host port **8001** (container **8000**) |
+| 3 | **Video worker** | Docker service **`worker`** — Arq, FFmpeg, yt-dlp |
+| + | **Redis** | Docker service **`redis`** — job queue |
+| + | **Postgres** | Docker service **`postgres`** — database (required for multi-container; SQLite is not shared across containers) |
 
 Python dependency layout (see [`backend/requirements.txt`](../backend/requirements.txt)):
 
@@ -24,8 +24,8 @@ Python dependency layout (see [`backend/requirements.txt`](../backend/requiremen
 ## Prerequisites (host machine)
 
 1. **Docker Desktop** (or Docker Engine + Compose v2) — `docker compose version` works.
-2. **Node.js 18+** and **npm** — for the frontend.
-3. **Ports free:** `8000` (API), `5173` (Vite), `5432` (Postgres), `6379` (Redis), or change mappings in [`docker-compose.yml`](../docker-compose.yml).
+2. **Node.js 18+** and **npm** — only if you run the **host** Vite dev server (Step 3, optional).
+3. **Ports free:** `8001` (API on host), `5173` (**web** UI), `5432` (Postgres), `6379` (Redis), or change mappings in [`docker-compose.yml`](../docker-compose.yml).
 4. **Git clone** of the repo (or your working copy).
 
 ---
@@ -45,7 +45,7 @@ Wait until Postgres is healthy and containers are up:
 docker compose ps
 ```
 
-You should see `api`, `worker`, `redis`, `postgres` running (or `running` / `healthy`).
+You should see `web`, `api`, `worker`, `redis`, `postgres` running (or `running` / `healthy`).
 
 Compose waits for Postgres to pass **`pg_isready`** before starting `api` and `worker`, so they should not connect before the database accepts connections.
 
@@ -56,7 +56,7 @@ Compose waits for Postgres to pass **`pg_isready`** before starting `api` and `w
 **API health** (slim API skips FFmpeg check; `media_check_skipped` may be true):
 
 ```bash
-curl -s http://127.0.0.1:8000/health
+curl -s http://127.0.0.1:8001/health
 ```
 
 Expect `"status":"ok"` and `"job_queue":"redis"`.
@@ -75,7 +75,11 @@ docker compose logs api --tail 80
 
 ---
 
-## Step 3 — Start the frontend (host)
+## Step 3 — Frontend
+
+**Default (included in `docker compose up`):** open **http://localhost:5173**. The **`web`** container serves the built SPA and proxies **`/api`** to the **`api`** service on the Docker network (same-origin; no CORS setup needed for the browser).
+
+**Optional — hot reload on the host:** stop the **`web`** service if port 5173 conflicts (`docker compose stop web`), then:
 
 ```bash
 cd frontend
@@ -83,13 +87,13 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:5173**. The Vite dev server proxies `/api` to **http://127.0.0.1:8000** (see `frontend/vite.config.ts`).
+Set **`VITE_API_TARGET=http://127.0.0.1:8001`** when the API runs in Compose (see `frontend/vite.config.ts`). Without it, Vite defaults to port **8000**.
 
 ---
 
 ## Step 4 — Smoke test
 
-1. In the UI, start a **YouTube** or **upload** ingest, or use `curl` against `http://127.0.0.1:8000` (see [README](../README.md)).
+1. In the UI, start a **YouTube** or **upload** ingest, or use `curl` against `http://127.0.0.1:8001` (see [README](../README.md)).
 2. Confirm the **worker** picks up jobs: `docker compose logs worker -f` while ingesting.
 3. After mezzanine exists, run **Generate clips** and wait for drafts.
 

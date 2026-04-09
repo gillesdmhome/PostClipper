@@ -1,9 +1,8 @@
-# Three-process stack: Redis, Postgres (optional for API+worker), website API, video worker.
-# Frontend: run `npm run dev` on host, or add a static service later.
+# Full stack: Redis, Postgres, API, worker, and web UI (nginx + static build).
 #
 #   docker compose up -d --build
 #
-# API: http://localhost:8001  |  Worker consumes Redis; mount shared DATA_DIR with API.
+# UI: http://localhost:5173  |  API: http://localhost:8001  |  Worker + Redis + Postgres
 services:
   redis:
     image: redis:7-alpine
@@ -70,6 +69,15 @@ services:
         condition: service_started
       postgres:
         condition: service_healthy
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "5173:80"
+    depends_on:
+      - api
 
 volumes:
   postclipper_pgdata:

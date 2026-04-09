@@ -6,6 +6,7 @@ node_modules/
 .trigger/
 __pycache__/
 *.pyc
-# Local backend overrides (optional); repository root `.env` is the shared template.
+# Environment and secrets (never commit)
+.env
 backend/.env
 .env.local

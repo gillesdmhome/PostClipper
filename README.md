@@ -26,7 +26,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 With **`REDIS_URL`** set, run the video worker in a second terminal from `backend/`: `arq app.worker.WorkerSettings` (see [`docs/deploy.md`](docs/deploy.md)).
 
-**Docker (three-process stack):** install **Docker Desktop** (or Engine + Compose v2). From the repo root run `docker compose up -d --build`, then start the frontend with `npm run dev` (Vite proxies to `http://127.0.0.1:8000`). Full checklist: **[`docs/docker-three-process-runbook.md`](docs/docker-three-process-runbook.md)**. Optional **[Trigger.dev](https://trigger.dev/)** queue hop (API stays responsive): edit repository [`.env`](.env) (`TRIGGER_*`, `POSTCLIPPER_*`), then [`docs/deploy.md`](docs/deploy.md) → *Trigger.dev*.
+**Docker (full stack):** install **Docker Desktop** (or Engine + Compose v2). From the repo root run `docker compose up -d --build`. The **web** service serves the UI at **`http://localhost:5173`** and proxies `/api` to the API container; the API is also on **`http://127.0.0.1:8001`** (mapped from the container). Full checklist: **[`docs/docker-three-process-runbook.md`](docs/docker-three-process-runbook.md)**. Optional **[Trigger.dev](https://trigger.dev/)** queue hop (API stays responsive): edit repository [`.env`](.env) (`TRIGGER_*`, `POSTCLIPPER_*`), then [`docs/deploy.md`](docs/deploy.md) → *Trigger.dev*.
+
+For **local frontend dev** (hot reload) with Docker API/worker/DB, run `npm run dev` in `frontend/` instead of using the `web` service; stop the `web` container if port 5173 conflicts.
 
 ```bash
 cd frontend
@@ -34,7 +36,7 @@ npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` — API proxied to `http://localhost:8000`.
+Open `http://localhost:5173` — with local Vite, `/api` is proxied to `http://127.0.0.1:8000` (see `frontend/vite.config.ts`). With **Docker web**, `/api` is proxied inside Compose to the `api` service.
 
 If your terminal was opened **before** Node was installed and `node` / `npm` are not found, either **restart the terminal/IDE** or from the repo root run:
 
@@ -45,8 +47,8 @@ If your terminal was opened **before** Node was installed and `node` / `npm` are
 ## URLs you will use (dev)
 
 - **Frontend UI**: `http://localhost:5173`
-- **Backend API**: `http://127.0.0.1:8000`
-- **Health check**: `GET /health` (example: `http://127.0.0.1:8000/health`)
+- **Backend API**: `http://127.0.0.1:8000` (local `uvicorn`) or **`http://127.0.0.1:8001`** when using **`docker compose`** (mapped port)
+- **Health check**: `GET /health` (example: `http://127.0.0.1:8000/health` or `http://127.0.0.1:8001/health` with Compose)
 
 If you can open `http://localhost:5173` but not `http://127.0.0.1:5173`, ensure Vite is bound to IPv4. In `frontend/vite.config.ts`, set `server.host = "0.0.0.0"` and restart `npm run dev`.
 
