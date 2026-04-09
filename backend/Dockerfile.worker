@@ -1,0 +1,21 @@
+# Video processing worker — FFmpeg on PATH; yt-dlp via pip.
+FROM python:3.12-slim-bookworm
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app/backend
+
+COPY backend/requirements-api.txt ./requirements-api.txt
+COPY backend/requirements-worker.txt ./requirements-worker.txt
+COPY backend/requirements-ml.txt ./requirements-ml.txt
+RUN pip install --no-cache-dir -r requirements-worker.txt
+# Include ML deps for real transcription + embeddings in the worker image.
+RUN pip install --no-cache-dir -r requirements-ml.txt
+
+COPY backend/ .
+
+ENV PYTHONPATH=/app/backend
+
+CMD ["arq", "app.worker.WorkerSettings"]

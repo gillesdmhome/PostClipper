@@ -46,26 +46,26 @@ export default function JobDetail() {
     }
   }
 
-  if ((err || error) && !data) return <p style={{ color: "crimson" }}>{err ?? error}</p>;
+  if ((err || error) && !data) return <p className="text-error">{err ?? error}</p>;
   if (!data) {
     return (
       <div className="card">
-        <p style={{ margin: 0, color: "#64748b" }}>{loading ? "Loading job details…" : "Job not found."}</p>
+        <p className="text-muted mb-zero">{loading ? "Loading job details…" : "Job not found."}</p>
       </div>
     );
   }
-
-  const proxySrc = `/api/jobs/${id}/media/proxy`;
 
   const status = data.job.status;
 
   return (
     <>
-      <p>
-        <Link to="/">← Dashboard</Link>
-      </p>
+      <Link to="/" className="back-link">
+        ← Dashboard
+      </Link>
       <div className="card">
-        <h2 style={{ marginTop: 0 }}>Job {data.job.id.slice(0, 8)}…</h2>
+        <h2>
+          Job <span className="mono">{data.job.id.slice(0, 8)}</span>…
+        </h2>
         <p>
           <span className={status === "failed" ? "badge failed" : "badge"}>{status}</span>
           {data.job.source_url && (
@@ -78,27 +78,26 @@ export default function JobDetail() {
           )}
         </p>
         <JobStatusProgress status={status} variant="full" />
-        {data.job.error_message && <p style={{ color: "crimson" }}>{data.job.error_message}</p>}
-        {msg && <p style={{ color: "#15803d" }}>{msg}</p>}
-        {err && <p style={{ color: "crimson" }}>{err}</p>}
-        <p style={{ color: "#475569", fontSize: "0.95rem", marginTop: 0 }}>
+        {data.job.error_message && <p className="text-error">{data.job.error_message}</p>}
+        {msg && <p className="text-success">{msg}</p>}
+        {err && <p className="text-error">{err}</p>}
+        <p className="text-muted text-small mt-sm">
           After ingest finishes, run generation once. Then review each suggested clip below before publishing.
         </p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+        <div className="flex-actions mt-sm">
           <button
             type="button"
-            className={`primary${busyAction === "generate" ? " btn-loading" : ""}`}
+            className={`primary btn-lg${busyAction === "generate" ? " btn-loading" : ""}`}
             onClick={() => runGenerateClips()}
             disabled={!data.job.mezzanine_path || !!busyAction}
             title={!data.job.mezzanine_path ? "Wait for ingest to finish" : "Transcribe → suggest → render"}
-            style={{ fontSize: "1rem", padding: "0.5rem 1rem" }}
           >
             {busyAction === "generate" ? "Starting clip generation…" : "Generate suggested clips & drafts"}
           </button>
         </div>
-        <details style={{ marginTop: 12 }}>
-          <summary style={{ cursor: "pointer", color: "#64748b" }}>Advanced: run one step at a time</summary>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
+        <details className="retro-details">
+          <summary>Advanced: run one step at a time</summary>
+          <div className="flex-actions" style={{ marginTop: 10 }}>
             <button
               type="button"
               onClick={() => run("transcribe")}
@@ -127,20 +126,13 @@ export default function JobDetail() {
         </details>
       </div>
 
-      {data.job.proxy_path && (
-        <div className="card">
-          <h3 style={{ marginTop: 0 }}>Full source preview (proxy)</h3>
-          <video src={proxySrc} controls style={{ width: "100%", maxHeight: 360, background: "#000" }} />
-        </div>
-      )}
-
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Suggested clips</h3>
+        <h3>Suggested clips</h3>
         <ClipReviewGrid candidates={data.candidates} onRefresh={() => (id ? refreshJobDetail(id, { force: true }) : undefined)} />
       </div>
 
       <div className="card">
-        <h3 style={{ marginTop: 0 }}>Logs</h3>
+        <h3>Logs</h3>
         <div className="logs">
           {[...data.logs].reverse().map((l) => (
             <div key={l.id} className={l.level === "error" ? "log-line error" : "log-line"}>

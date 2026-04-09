@@ -6,9 +6,9 @@ Semi-automated ingestion (YouTube, Twitch, uploads), transcription, clip suggest
 
 - **Python 3.12+** (latest stable from [python.org](https://www.python.org/downloads/) or `winget install Python.Python.3.14`). **Python 3.14+** needs **SQLAlchemy ≥2.0.45** (see `backend/requirements.txt`).
 - **Node.js 18+** (includes `npm`). Install from [nodejs.org](https://nodejs.org) or: `winget install OpenJS.NodeJS.LTS`
-- **ffmpeg** and **ffprobe** (not installed via pip; required on the host for mezzanine, proxy, renders, and yt-dlp merges). Install examples: **Windows** `winget install Gyan.FFmpeg`; **macOS** `brew install ffmpeg`; **Linux** use your distro package (e.g. `apt install ffmpeg`). After starting the API, verify **`GET http://127.0.0.1:8000/health`**: **`ffmpeg_ok`** should be `true` and **`ffmpeg`** / **`ffprobe`** should list resolved paths. Resolution order is described in [`docs/platforms.md`](docs/platforms.md) (ffmpeg / yt-dlp): `.env` overrides, process `PATH`, on Windows also registry `Path` and common install locations, on macOS also `/opt/homebrew/bin` and `/usr/local/bin` when `PATH` is minimal (e.g. IDE launches). If anything still fails, set **`FFMPEG_PATH`** and **`FFPROBE_PATH`** in **`backend/.env`** (see [`backend/.env.example`](backend/.env.example)); on Windows you can run **`powershell -ExecutionPolicy Bypass -File backend\scripts\print-ffmpeg-paths.ps1`** from the repo root to print suggested lines.
-- **yt-dlp** is installed via `backend/requirements.txt`
-- Optional ML stack (recommended): **`pip install -r requirements-ml.txt`** — installs **faster-whisper** (real ASR; avoids placeholder transcript text) and **sentence-transformers** (set **`SUGGEST_ENGINE=embeddings`** in `backend/.env`). After installing, **re-run transcribe / generate clips** on a job so the DB is not stuck on old placeholder segments.
+- **ffmpeg** and **ffprobe** (not installed via pip; required for mezzanine, proxy, renders, and yt-dlp merges **on the video worker**). In a **split deploy**, the slim website API can set **`API_SKIP_MEDIA_CHECK=true`** and omit FFmpeg; the **Arq worker** must have FFmpeg on `PATH`. Install examples: **Windows** `winget install Gyan.FFmpeg`; **macOS** `brew install ffmpeg`; **Linux** your distro package. After starting a **combined** dev API, **`GET /health`**: **`ffmpeg_ok`** should be `true` unless media check is skipped. Details: [`docs/platforms.md`](docs/platforms.md), [`docs/deploy.md`](docs/deploy.md).
+- **yt-dlp** — pulled in by **`backend/requirements.txt`** (via `requirements-worker.txt`). The slim API-only list is **`backend/requirements-api.txt`** (Docker `Dockerfile.api`; no yt-dlp).
+- Optional ML stack: from **`backend/`**, **`pip install -r requirements-ml.txt`** — **faster-whisper** and **sentence-transformers** (set **`SUGGEST_ENGINE=embeddings`** in repository **`.env`** or **`backend/.env`**). Not included in the default **`Dockerfile.worker`** image; extend the image or install in a local venv. After installing, **re-run transcribe / generate clips** on a job so the DB is not stuck on old placeholder segments.
 
 ## Quick start
 
@@ -19,9 +19,14 @@ python -m venv .venv
 .venv\Scripts\activate   # Windows
 source .venv/bin/activate   # macOS/Linux
 pip install -r requirements.txt
+# API-only venv (no yt-dlp): pip install -r requirements-api.txt
 # Optional ML: pip install -r requirements-ml.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+With **`REDIS_URL`** set, run the video worker in a second terminal from `backend/`: `arq app.worker.WorkerSettings` (see [`docs/deploy.md`](docs/deploy.md)).
+
+**Docker (three-process stack):** install **Docker Desktop** (or Engine + Compose v2). From the repo root run `docker compose up -d --build`, then start the frontend with `npm run dev` (Vite proxies to `http://127.0.0.1:8000`). Full checklist: **[`docs/docker-three-process-runbook.md`](docs/docker-three-process-runbook.md)**. Optional **[Trigger.dev](https://trigger.dev/)** queue hop (API stays responsive): edit repository [`.env`](.env) (`TRIGGER_*`, `POSTCLIPPER_*`), then [`docs/deploy.md`](docs/deploy.md) → *Trigger.dev*.
 
 ```bash
 cd frontend
@@ -108,13 +113,17 @@ curl http://127.0.0.1:8000/api/jobs
 curl http://127.0.0.1:8000/api/jobs/JOB_ID
 ```
 
-### Media preview URLs
+### Media URLs (API)
 
-- Proxy preview: `GET /api/jobs/{job_id}/media/proxy`\n+- Mezzanine: `GET /api/jobs/{job_id}/media/mezzanine`\n+- Draft per candidate: `GET /api/candidates/{candidate_id}/media/draft`
+- Mezzanine: `GET /api/jobs/{job_id}/media/mezzanine`
+- Proxy (low-res): `GET /api/jobs/{job_id}/media/proxy`
+- Draft per candidate (after render): `GET /api/candidates/{candidate_id}/media/draft`
+
+The job detail UI shows **draft** previews in **Suggested clips**; it does not embed the full-source proxy player.
 
 ### YouTube downloads (403 / cookies)
 
-If ingest from YouTube fails with HTTP 403 or cookie errors: copy `backend/.env.example` to `backend/.env`, set **`YTDLP_COOKIES_FILE`** to a Netscape-format `cookies.txt` exported while logged into YouTube, or **`YTDLP_COOKIES_FROM_BROWSER=firefox`**. On Windows, **Chrome/Edge** often hit DPAPI decrypt errors with `--cookies-from-browser`; use a file export instead. Details: `docs/platforms.md`.
+If ingest from YouTube fails with HTTP 403 or cookie errors: set **`YTDLP_COOKIES_FILE`** or **`YTDLP_COOKIES_FROM_BROWSER`** in repository [`.env`](.env) (or override in optional `backend/.env`). On Windows, **Chrome/Edge** often hit DPAPI decrypt errors with `--cookies-from-browser`; use a file export instead. Details: `docs/platforms.md`.
 
 ### FFmpeg / ffprobe not found
 

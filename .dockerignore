@@ -1,0 +1,12 @@
+.git
+.gitignore
+**/__pycache__
+**/*.pyc
+**/.venv
+**/node_modules
+frontend/dist
+backend/data
+*.db
+.cursor
+.env
+**/.env.local

@@ -24,6 +24,15 @@ from app.services.publish import create_export_bundle, try_youtube_shorts_upload
 from app.services.captions import merge_segments_from_storage
 from app.services.render import render_vertical_clip
 from app.services.suggest import suggest_clips
+from app.services.scene_detect import detect_scene_cuts_ffmpeg
+from app.services.boundaries import (
+    boundaries_from_transcript,
+    merge_boundaries,
+    write_boundaries_json,
+)
+from app.services.captioning import generate_caption
+from app.services.platforms import PRESETS, default_platforms
+from app.services.fill_candidates import fill_non_overlapping
 
 # Serialize suggest/render (and full clip pipeline) per job so concurrent runs do not delete
 # clip_candidates while another session still holds ORM rows (StaleDataError on flush).
@@ -58,14 +67,17 @@ async def run_youtube_ingest(job_id: str, url: str):
             await session.commit()
 
         dirs = ensure_dirs(job_id)
-        ok, path, err = download_with_ytdlp(url, dirs["raw"], "source")
+        # yt-dlp / FFmpeg are synchronous; never run them on the asyncio loop — that stalls every
+        # concurrent request on this process (e.g. GET /api/jobs/{id}) when REDIS_URL is unset and
+        # FastAPI BackgroundTasks runs this coroutine on the API worker.
+        ok, path, err = await asyncio.to_thread(download_with_ytdlp, url, dirs["raw"], "source")
         if not ok or not path:
             async with async_session_maker() as session:
                 await _set_job_failed(session, job_id, err or "download failed")
                 await session.commit()
             return
 
-        ok2, err2, meta = ingest_pipeline(job_id, path)
+        ok2, err2, meta = await asyncio.to_thread(ingest_pipeline, job_id, path)
         async with async_session_maker() as session:
             if not ok2:
                 await _set_job_failed(session, job_id, err2)
@@ -97,14 +109,14 @@ async def run_twitch_ingest(job_id: str, url: str):
             await session.commit()
 
         dirs = ensure_dirs(job_id)
-        ok, path, err = download_with_ytdlp(url, dirs["raw"], "source")
+        ok, path, err = await asyncio.to_thread(download_with_ytdlp, url, dirs["raw"], "source")
         if not ok or not path:
             async with async_session_maker() as session:
                 await _set_job_failed(session, job_id, err or "download failed")
                 await session.commit()
             return
 
-        ok2, err2, meta = ingest_pipeline(job_id, path)
+        ok2, err2, meta = await asyncio.to_thread(ingest_pipeline, job_id, path)
         async with async_session_maker() as session:
             if not ok2:
                 await _set_job_failed(session, job_id, err2)
@@ -125,8 +137,8 @@ async def run_twitch_ingest(job_id: str, url: str):
 
 
 async def run_upload_ingest(job_id: str, saved_path: str):
-    async with async_session_maker() as session:
-        try:
+    try:
+        async with async_session_maker() as session:
             job = await session.get(Job, job_id)
             if not job:
                 return
@@ -135,24 +147,25 @@ async def run_upload_ingest(job_id: str, saved_path: str):
             await add_log(session, job_id, f"Upload ingest: {saved_path}")
             await session.commit()
 
-            ok2, err2, meta = ingest_pipeline(job_id, Path(saved_path))
+        ok2, err2, meta = await asyncio.to_thread(ingest_pipeline, job_id, Path(saved_path))
+        async with async_session_maker() as session:
             job = await session.get(Job, job_id)
+            if not job:
+                return
             if not ok2:
                 await _set_job_failed(session, job_id, err2)
                 await session.commit()
                 return
-
             job.mezzanine_path = meta["mezzanine_path"]
             job.proxy_path = meta["proxy_path"]
             job.duration_seconds = meta.get("duration_seconds")
             job.status = JobStatus.ingested.value
             await add_log(session, job_id, "Ingest complete; mezzanine ready")
             await session.commit()
-        except Exception as e:
-            await session.rollback()
-            async with async_session_maker() as s2:
-                await _set_job_failed(s2, job_id, str(e))
-                await s2.commit()
+    except Exception as e:
+        async with async_session_maker() as s2:
+            await _set_job_failed(s2, job_id, str(e))
+            await s2.commit()
 
 
 async def run_transcribe(job_id: str):
@@ -225,19 +238,92 @@ async def _run_suggest_clips_impl(job_id: str):
             await session.commit()
 
             segs = [{"start": s.start_sec, "end": s.end_sec, "text": s.text} for s in tr.segments]
-            suggested = suggest_clips(segs)
+
+            # Boundary detection (scene cuts + transcript pauses/punctuation) to avoid mid-scene cuts.
+            scene_cuts: list[float] = []
+            if job.mezzanine_path:
+                await add_log(session, job_id, "Detecting scene cuts (ffmpeg) for better clip boundaries")
+                await session.commit()
+                sd = await asyncio.to_thread(
+                    detect_scene_cuts_ffmpeg,
+                    job_id,
+                    job.mezzanine_path,
+                    threshold=0.35,
+                    min_gap_sec=0.7,
+                    write_json=True,
+                )
+                scene_cuts = sd.cuts
+                if sd.raw_stderr_tail:
+                    await add_log(session, job_id, f"Scene detect: found {len(scene_cuts)} cuts")
+                    await session.commit()
+
+            tb = boundaries_from_transcript(segs, min_pause_sec=0.85)
+            b = merge_boundaries(scene_cuts=scene_cuts, transcript_boundaries=tb)
+            write_boundaries_json(job_id, b)
+
+            # Platform-aware suggestion: generate multiple sets with platform-specific length caps.
+            suggested: list[dict] = []
+            for plat in default_platforms():
+                preset = PRESETS[plat]
+                exclude: list[tuple[float, float]] = []
+                s_plat = suggest_clips(
+                    segs,
+                    target_min=preset.target_min,
+                    target_max=min(preset.target_max, preset.hard_max),
+                    max_candidates=preset.max_candidates,
+                    exclude_ranges=exclude,
+                    boundaries=b.merged,
+                    boundary_scene_cuts=b.scene_cuts,
+                    boundary_pauses=b.pauses,
+                    boundary_punctuation_ends=b.punctuation_ends,
+                )
+                # If we got too few, fill using boundary-to-boundary windows (still non-overlapping).
+                s_plat = fill_non_overlapping(
+                    s_plat,
+                    boundaries=b.merged,
+                    duration_sec=job.duration_seconds,
+                    target_min=preset.target_min,
+                    target_max=preset.target_max,
+                    hard_max=preset.hard_max,
+                    want_total=preset.max_candidates,
+                )
+                for x in s_plat:
+                    x["platform"] = plat
+                suggested.extend(s_plat)
 
             await session.execute(delete(ClipCandidate).where(ClipCandidate.job_id == job_id))
             for s in suggested:
+                start_sec = float(s["start_sec"])
+                end_sec = float(s["end_sec"])
+                excerpt = " ".join(
+                    str(x.get("text", "")).strip()
+                    for x in segs
+                    if float(x.get("end", 0.0)) >= start_sec and float(x.get("start", 0.0)) <= end_sec
+                ).strip()
+                cap = await asyncio.to_thread(
+                    generate_caption,
+                    job_id=job_id,
+                    platform=(s.get("platform") or "shortform"),
+                    start_sec=start_sec,
+                    end_sec=end_sec,
+                    segments=segs,
+                    transcript_excerpt=excerpt[:2000],
+                    suggested_title=s.get("suggested_title"),
+                    hook_text=s.get("hook_text"),
+                    suggested_hashtags=s.get("suggested_hashtags"),
+                    force_regen=False,
+                )
                 session.add(
                     ClipCandidate(
                         job_id=job_id,
-                        start_sec=s["start_sec"],
-                        end_sec=s["end_sec"],
+                        start_sec=start_sec,
+                        end_sec=end_sec,
                         score=s.get("score"),
-                        hook_text=s.get("hook_text"),
-                        suggested_title=s.get("suggested_title"),
-                        suggested_hashtags=s.get("suggested_hashtags"),
+                        platform=s.get("platform"),
+                        hook_text=cap.hook or s.get("hook_text"),
+                        suggested_title=cap.title or s.get("suggested_title"),
+                        suggested_hashtags=cap.hashtags or s.get("suggested_hashtags"),
+                        suggested_description=cap.description,
                         review_status="pending",
                     )
                 )
@@ -269,7 +355,7 @@ async def _run_render_drafts_impl(job_id: str):
             )
             tr = q.scalar_one_or_none()
             if not tr or not tr.segments:
-                await _set_job_failed(session, job_id, "No transcript; cannot render captions")
+                await _set_job_failed(session, job_id, "No transcript; cannot render drafts")
                 await session.commit()
                 return
 
@@ -286,12 +372,22 @@ async def _run_render_drafts_impl(job_id: str):
 
             # Detach ORM rows so a concurrent suggest pass cannot leave stale instances that flush
             # UPDATEs against deleted PKs (StaleDataError: 0 rows matched).
-            plan = [(c.id, float(c.start_sec), float(c.end_sec)) for c in candidates]
+            plan = [
+                (
+                    c.id,
+                    float(c.start_sec),
+                    float(c.end_sec),
+                    c.platform,
+                    c.hook_text,
+                    c.suggested_title,
+                )
+                for c in candidates
+            ]
             for c in candidates:
                 session.expunge(c)
 
             job.status = JobStatus.rendering.value
-            await add_log(session, job_id, f"Rendering {len(plan)} drafts")
+            await add_log(session, job_id, f"Rendering {len(plan)} drafts (letterbox context captions)")
             await session.commit()
 
             fallback_segs = [
@@ -299,8 +395,9 @@ async def _run_render_drafts_impl(job_id: str):
                 for s in tr.segments
             ]
             segments = merge_segments_from_storage(tr.raw_json_path, fallback_segs)
-            for cid, start_sec, end_sec in plan:
+            for cid, start_sec, end_sec, platform, hook_text, suggested_title in plan:
                 out_name = f"draft_{cid[:8]}.mp4"
+                preset = PRESETS.get(platform or "", PRESETS["tiktok"])
                 ok, err, path = render_vertical_clip(
                     job_id,
                     mezzanine_path,
@@ -308,6 +405,11 @@ async def _run_render_drafts_impl(job_id: str):
                     end_sec,
                     segments,
                     out_name,
+                    width=preset.width,
+                    height=preset.height,
+                    letterbox_bottom_px=preset.letterbox_bottom_px,
+                    hook_text=hook_text,
+                    suggested_title=suggested_title,
                 )
                 if not ok:
                     await add_log(session, job_id, f"Render failed for candidate {cid}: {err}", "error")
@@ -418,6 +520,8 @@ async def run_suggest_alternative(old_candidate_id: str) -> None:
             s0["end_sec"],
             merged,
             out_name,
+            hook_text=s0.get("hook_text"),
+            suggested_title=s0.get("suggested_title"),
         )
         async with async_session_maker() as s_up:
             nc = await s_up.get(ClipCandidate, new_id)
@@ -437,6 +541,103 @@ async def run_suggest_alternative(old_candidate_id: str) -> None:
         async with async_session_maker() as s2:
             if job_id_for_err:
                 await add_log(s2, job_id_for_err, f"Suggest alternative failed: {e}", "error")
+            await s2.commit()
+
+
+async def run_regenerate_caption(candidate_id: str) -> None:
+    """Regenerate caption fields (LLM/heuristic) and re-render the draft so the letterbox updates."""
+    job_id_for_err: str | None = None
+    try:
+        async with async_session_maker() as session:
+            c = await session.get(ClipCandidate, candidate_id)
+            if not c:
+                return
+            job_id_for_err = c.job_id
+            job = await session.get(Job, c.job_id)
+            if not job or not job.mezzanine_path:
+                await add_log(session, c.job_id, "Regenerate caption: job not ready", "error")
+                await session.commit()
+                return
+
+            q_tr = await session.execute(
+                select(Transcript)
+                .options(selectinload(Transcript.segments))
+                .where(Transcript.job_id == c.job_id)
+            )
+            tr = q_tr.scalar_one_or_none()
+            if not tr or not tr.segments:
+                await add_log(session, c.job_id, "Regenerate caption: missing transcript", "error")
+                await session.commit()
+                return
+
+            segs = [{"start": s.start_sec, "end": s.end_sec, "text": s.text} for s in tr.segments]
+            start_sec = float(c.start_sec)
+            end_sec = float(c.end_sec)
+            excerpt = " ".join(
+                str(x.get("text", "")).strip()
+                for x in segs
+                if float(x.get("end", 0.0)) >= start_sec and float(x.get("start", 0.0)) <= end_sec
+            ).strip()
+
+            await add_log(session, c.job_id, f"Regenerating caption for candidate {candidate_id[:8]}…")
+            await session.commit()
+
+            cap = await asyncio.to_thread(
+                generate_caption,
+                job_id=c.job_id,
+                platform=c.platform or "shortform",
+                start_sec=start_sec,
+                end_sec=end_sec,
+                segments=segs,
+                transcript_excerpt=excerpt[:2000],
+                suggested_title=c.suggested_title,
+                hook_text=c.hook_text,
+                suggested_hashtags=c.suggested_hashtags,
+                force_regen=True,
+            )
+
+            c.hook_text = cap.hook or c.hook_text
+            c.suggested_title = cap.title or c.suggested_title
+            c.suggested_hashtags = cap.hashtags or c.suggested_hashtags
+            c.suggested_description = cap.description
+            await session.flush()
+
+            # Render immediately with updated letterbox text.
+            preset = PRESETS.get(c.platform or "", PRESETS["tiktok"])
+            fallback_segs = [
+                {"start": float(s.start_sec), "end": float(s.end_sec), "text": s.text}
+                for s in tr.segments
+            ]
+            merged = merge_segments_from_storage(tr.raw_json_path, fallback_segs)
+            out_name = f"draft_{candidate_id[:8]}.mp4"
+            await session.commit()
+
+        ok, err, path = render_vertical_clip(
+            job_id_for_err,
+            job.mezzanine_path,
+            start_sec,
+            end_sec,
+            merged,
+            out_name,
+            width=preset.width,
+            height=preset.height,
+            letterbox_bottom_px=preset.letterbox_bottom_px,
+            hook_text=cap.hook,
+            suggested_title=cap.title,
+        )
+        async with async_session_maker() as s_up:
+            c2 = await s_up.get(ClipCandidate, candidate_id)
+            if c2:
+                if ok and path:
+                    c2.draft_video_path = path
+                    await add_log(s_up, c2.job_id, f"Caption regenerated and draft updated ({candidate_id[:8]}…)")
+                else:
+                    await add_log(s_up, c2.job_id, f"Caption regenerated but render failed: {err}", "error")
+            await s_up.commit()
+    except Exception as e:
+        async with async_session_maker() as s2:
+            if job_id_for_err:
+                await add_log(s2, job_id_for_err, f"Regenerate caption failed: {e}", "error")
             await s2.commit()
 
 

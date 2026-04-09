@@ -1,0 +1,14 @@
+{
+  "name": "postclipper",
+  "private": true,
+  "scripts": {
+    "trigger:dev": "trigger dev",
+    "trigger:deploy": "trigger deploy"
+  },
+  "devDependencies": {
+    "@trigger.dev/sdk": "4.4.3",
+    "dotenv": "^16.4.5",
+    "trigger.dev": "4.4.3",
+    "typescript": "^5.6.0"
+  }
+}

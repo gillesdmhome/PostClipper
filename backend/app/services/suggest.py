@@ -196,6 +196,10 @@ def suggest_clips(
     target_max: float = 55.0,
     max_candidates: int = 12,
     exclude_ranges: Optional[List[Tuple[float, float]]] = None,
+    boundaries: Optional[List[float]] = None,
+    boundary_scene_cuts: Optional[List[float]] = None,
+    boundary_pauses: Optional[List[float]] = None,
+    boundary_punctuation_ends: Optional[List[float]] = None,
 ) -> list[dict[str, Any]]:
     """
     Dispatch to heuristic or embedding-based suggestion (see settings.suggest_engine).
@@ -208,22 +212,123 @@ def suggest_clips(
         try:
             from app.services import suggest_embeddings
 
-            return suggest_embeddings.suggest_clips_embeddings(
+            out = suggest_embeddings.suggest_clips_embeddings(
                 segments,
                 target_min=target_min,
                 target_max=target_max,
                 max_candidates=max_candidates,
                 exclude_ranges=exclude_ranges,
             )
+            out = snap_candidates_to_boundaries(
+                out,
+                boundaries=boundaries,
+                scene_cuts=boundary_scene_cuts,
+                pauses=boundary_pauses,
+                punctuation_ends=boundary_punctuation_ends,
+                target_min=target_min,
+                target_max=target_max,
+            )
+            return out
         except ImportError as e:
             _log.warning("SUGGEST_ENGINE=embeddings but ML deps missing (%s); using heuristic", e)
         except Exception as e:
             _log.exception("Embedding suggest failed; using heuristic: %s", e)
 
-    return suggest_clips_from_segments(
+    out = suggest_clips_from_segments(
         segments,
         target_min=target_min,
         target_max=target_max,
         max_candidates=max_candidates,
         exclude_ranges=exclude_ranges,
     )
+    return snap_candidates_to_boundaries(
+        out,
+        boundaries=boundaries,
+        scene_cuts=boundary_scene_cuts,
+        pauses=boundary_pauses,
+        punctuation_ends=boundary_punctuation_ends,
+        target_min=target_min,
+        target_max=target_max,
+    )
+
+
+def _nearest_prev(boundaries: list[float], t: float, *, max_back: float) -> float:
+    best = t
+    for b in boundaries:
+        if b <= t and (t - b) <= max_back:
+            best = b
+        if b > t:
+            break
+    return best
+
+
+def _nearest_next(boundaries: list[float], t: float, *, max_fwd: float) -> float:
+    for b in boundaries:
+        if b >= t and (b - t) <= max_fwd:
+            return b
+    return t
+
+
+def snap_candidates_to_boundaries(
+    candidates: list[dict[str, Any]],
+    *,
+    boundaries: Optional[list[float]] = None,
+    scene_cuts: Optional[list[float]] = None,
+    pauses: Optional[list[float]] = None,
+    punctuation_ends: Optional[list[float]] = None,
+    target_min: float,
+    target_max: float,
+    max_snap_back: float = 6.0,
+    max_snap_fwd: float = 10.0,
+) -> list[dict[str, Any]]:
+    """
+    Snap candidate start/end to nearby boundaries to produce more self-contained segments.
+
+    Preference:
+    - start: snap backwards to nearest scene cut (else pause), falling back to generic boundaries
+    - end: snap forwards to nearest punctuation end (else pause), falling back to generic boundaries
+    """
+    if not candidates:
+        return candidates
+
+    b_generic = sorted({float(x) for x in (boundaries or []) if x is not None})
+    b_scene = sorted({float(x) for x in (scene_cuts or []) if x is not None})
+    b_pause = sorted({float(x) for x in (pauses or []) if x is not None})
+    b_punct = sorted({float(x) for x in (punctuation_ends or []) if x is not None})
+    if not (b_generic or b_scene or b_pause or b_punct):
+        return candidates
+
+    out: list[dict[str, Any]] = []
+    for c in candidates:
+        start = float(c["start_sec"])
+        end = float(c["end_sec"])
+        # Prefer snapping starts to scene boundaries (clean visual starts).
+        s2 = _nearest_prev(b_scene, start, max_back=max_snap_back) if b_scene else start
+        if s2 == start and b_pause:
+            s2 = _nearest_prev(b_pause, start, max_back=max_snap_back)
+        if s2 == start and b_generic:
+            s2 = _nearest_prev(b_generic, start, max_back=max_snap_back)
+
+        # Prefer snapping ends to punctuation/pauses (clean thought endings).
+        e2 = _nearest_next(b_punct, end, max_fwd=max_snap_fwd) if b_punct else end
+        if e2 == end and b_pause:
+            e2 = _nearest_next(b_pause, end, max_fwd=max_snap_fwd)
+        if e2 == end and b_generic:
+            e2 = _nearest_next(b_generic, end, max_fwd=max_snap_fwd)
+        if e2 <= s2:
+            s2, e2 = start, end
+        dur = e2 - s2
+        if dur < target_min:
+            # Try to extend to a "good end" beyond target_min.
+            want = s2 + target_min
+            e_try = _nearest_next(b_punct, want, max_fwd=max_snap_fwd) if b_punct else want
+            if e_try == want and b_pause:
+                e_try = _nearest_next(b_pause, want, max_fwd=max_snap_fwd)
+            if e_try == want and b_generic:
+                e_try = _nearest_next(b_generic, want, max_fwd=max_snap_fwd)
+            e2 = e_try
+        elif dur > target_max:
+            e2 = min(e2, s2 + target_max)
+        c2 = {**c, "start_sec": round(float(s2), 3), "end_sec": round(float(e2), 3)}
+        out.append(c2)
+    return out

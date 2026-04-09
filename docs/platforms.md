@@ -24,7 +24,7 @@ Upload the zip contents manually or via a scheduler (Metricool, Buffer, etc.).
 ## ffmpeg / yt-dlp
 
 - **ffmpeg** and **ffprobe** are required for mezzanine, proxy, vertical renders, and yt-dlp merges.
-- **`backend/.env`** is always loaded from the backend directory (not the shell’s current directory), so `FFMPEG_PATH` applies even if you start uvicorn from the repo root.
+- **Env files:** repository root **`.env`** is loaded first, then optional **`backend/.env`** (overrides). Paths are fixed relative to those files, not the shell’s cwd, so `FFMPEG_PATH` still applies if you start uvicorn from the repo root.
 - The backend resolves binaries in this order: **`FFMPEG_PATH` / `FFPROBE_PATH`** in `.env`, then the process **`PATH`**, then on **macOS/Linux** **`/opt/homebrew/bin`** and **`/usr/local/bin`** when `PATH` is minimal (typical GUI/IDE launches), then on **Windows** the **machine + user `Path` from the registry** (so winget/user installs work even when Cursor/IDE starts Python with a minimal `PATH`), then known locations (**WinGet** packages, **Program Files**, **Scoop**, **Chocolatey**). **`ffprobe`** is usually resolved next to **`ffmpeg`** in the same directory.
 - **yt-dlp** is pulled in via `pip install -r requirements.txt`; the app runs it as `python -m yt_dlp` if the `yt-dlp` executable is not on `PATH`. When ffmpeg is discovered, its directory is prepended to `PATH` for yt-dlp subprocesses, and **`--ffmpeg-location`** is passed so merges still work.
 - **`GET /health`** returns **`ffmpeg_ok`** plus resolved **`ffmpeg`** / **`ffprobe`** paths (or `null`) for quick checks. On Windows, from **`backend`**, run **`powershell -ExecutionPolicy Bypass -File scripts/print-ffmpeg-paths.ps1`** to print `.env` lines.
@@ -38,7 +38,7 @@ YouTube often blocks the default **web** client (SABR-only formats, HTTP 403). T
 If downloads still fail:
 
 1. **Use Python 3.12+** for the backend venv, then **`pip install -U yt-dlp`** (consider a [nightly build](https://github.com/yt-dlp/yt-dlp/wiki/Installation) if YouTube still breaks).
-2. **Cookies** (while logged into YouTube), in `.env` next to the backend:
+2. **Cookies** (while logged into YouTube), in repository **`.env`** or **`backend/.env`**:
    - **Preferred on Windows:** export a Netscape `cookies.txt` and set `YTDLP_COOKIES_FILE=C:\path\to\cookies.txt` (avoids DPAPI issues).
    - **`--cookies-from-browser`:** `firefox` usually works on Windows; **Chrome / Edge** often hit **“Failed to decrypt with DPAPI”** ([yt-dlp #10927](https://github.com/yt-dlp/yt-dlp/issues/10927)) — use a file export or Firefox instead.
 

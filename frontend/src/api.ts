@@ -44,9 +44,11 @@ export type ClipCandidate = {
   start_sec: number;
   end_sec: number;
   score: number | null;
+  platform?: string | null;
   hook_text: string | null;
   suggested_title: string | null;
   suggested_hashtags: string | null;
+  suggested_description?: string | null;
   draft_video_path: string | null;
   approved: number;
   review_status?: string;
@@ -112,6 +114,8 @@ export const patchCandidate = (
     end_sec: number;
     hook_text: string;
     suggested_title: string;
+    suggested_hashtags: string;
+    suggested_description: string;
     approved: number;
     review_status: "pending" | "accepted" | "rejected";
   }>
@@ -129,6 +133,12 @@ export const rejectCandidate = (id: string) =>
 
 export const suggestAlternative = (id: string) =>
   api<{ ok: boolean; message?: string }>(`/api/candidates/${id}/suggest-alternative`, {
+    method: "POST",
+    body: "{}",
+  });
+
+export const regenerateCaption = (id: string) =>
+  api<{ ok: boolean; message?: string }>(`/api/candidates/${id}/regenerate-caption`, {
     method: "POST",
     body: "{}",
   });

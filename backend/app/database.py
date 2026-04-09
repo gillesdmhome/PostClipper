@@ -6,14 +6,20 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from app.config import settings
 from app.models import Base
 
-engine = create_async_engine(settings.database_url, echo=False)
+_engine_kwargs: dict = {"echo": False}
+if "sqlite" not in settings.database_url.lower():
+    _engine_kwargs["pool_pre_ping"] = True
+
+engine = create_async_engine(settings.database_url, **_engine_kwargs)
 async_session_maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    # SQLite: add review_status on DBs created before this column existed
+    # SQLite only: add review_status on DBs created before this column existed
+    if "sqlite" not in settings.database_url.lower():
+        return
     try:
         async with engine.begin() as conn:
             await conn.execute(
@@ -30,6 +36,17 @@ async def init_db():
             )
     except Exception:
         pass
+
+    # SQLite only: forward-compatible additive columns (no Alembic in this repo).
+    for ddl in [
+        "ALTER TABLE clip_candidates ADD COLUMN platform VARCHAR(32) NULL",
+        "ALTER TABLE clip_candidates ADD COLUMN suggested_description TEXT NULL",
+    ]:
+        try:
+            async with engine.begin() as conn:
+                await conn.execute(text(ddl))
+        except Exception:
+            pass
 
 
 async def get_session():

@@ -65,9 +65,11 @@ class ClipCandidateOut(BaseModel):
     start_sec: float
     end_sec: float
     score: Optional[float]
+    platform: Optional[str] = None
     hook_text: Optional[str]
     suggested_title: Optional[str]
     suggested_hashtags: Optional[str]
+    suggested_description: Optional[str] = None
     draft_video_path: Optional[str]
     approved: int
     review_status: str = "pending"
@@ -98,6 +100,7 @@ class CandidatePatch(BaseModel):
     hook_text: Optional[str] = None
     suggested_title: Optional[str] = None
     suggested_hashtags: Optional[str] = None
+    suggested_description: Optional[str] = None
     approved: Optional[int] = None
     review_status: Optional[Literal["pending", "accepted", "rejected"]] = None
 

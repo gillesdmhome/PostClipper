@@ -1,0 +1,7 @@
+# Video processing worker: API deps + yt-dlp (FFmpeg must be on PATH or via FFMPEG_PATH).
+#
+# NOTE: ML deps (faster-whisper / sentence-transformers) are intentionally NOT included here,
+# because Dockerfile.worker may want a slimmer image. For a full local install, use
+# backend/requirements.txt, which includes requirements-ml.txt.
+-r requirements-api.txt
+yt-dlp>=2025.10.14

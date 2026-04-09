@@ -137,15 +137,20 @@ export function useJobsDashboard() {
   };
 }
 
-export async function refreshJobDetail(id: string, opts: { force?: boolean } = {}): Promise<void> {
+export async function refreshJobDetail(
+  id: string,
+  opts: { force?: boolean; silent?: boolean } = {}
+): Promise<void> {
   if (!id) return;
   const now = Date.now();
   const current = ensureJobDetailState(id);
-  const { force } = opts;
+  const { force, silent } = opts;
   const isStale = !current.lastLoadedAt || now - current.lastLoadedAt > 3000;
   if (!force && (current.loading || !isStale)) return;
 
-  setJobDetailState(id, { loading: true });
+  if (!silent) {
+    setJobDetailState(id, { loading: true });
+  }
   try {
     const data = await fetchJob(id);
     setJobDetailState(id, {
@@ -181,7 +186,7 @@ export function useJobDetail(jobId: string | undefined) {
       return;
     }
     const id = setInterval(() => {
-      void refreshJobDetail(jobId);
+      void refreshJobDetail(jobId, { force: true, silent: true });
     }, 3000);
     return () => clearInterval(id);
   }, [jobId, local.data?.job.status]);

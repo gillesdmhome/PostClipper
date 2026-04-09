@@ -1,0 +1,76 @@
+# Three-process stack: Redis, Postgres (optional for API+worker), website API, video worker.
+# Frontend: run `npm run dev` on host, or add a static service later.
+#
+#   docker compose up -d --build
+#
+# API: http://localhost:8001  |  Worker consumes Redis; mount shared DATA_DIR with API.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postclipper
+      POSTGRES_PASSWORD: postclipper
+      POSTGRES_DB: postclipper
+    ports:
+      - "5432:5432"
+    volumes:
+      - postclipper_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postclipper -d postclipper"]
+      interval: 3s
+      timeout: 5s
+      retries: 15
+      start_period: 5s
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.api
+    env_file:
+      - .env
+    ports:
+      - "8001:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://postclipper:postclipper@postgres:5432/postclipper
+      DATA_DIR: /data
+      API_SKIP_MEDIA_CHECK: "true"
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    volumes:
+      - postclipper_media:/data
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile.worker
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://postclipper:postclipper@postgres:5432/postclipper
+      DATA_DIR: /data
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      # If you run Ollama on the host, this lets the worker call it (Docker Desktop).
+      # On Linux, replace host.docker.internal with your host IP or run Ollama in compose.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    volumes:
+      - postclipper_media:/data
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postclipper_pgdata:
+  postclipper_media:
