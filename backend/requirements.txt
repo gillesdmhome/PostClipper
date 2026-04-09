@@ -7,5 +7,10 @@
 #   pip install -r requirements-worker.txt # video worker / Dockerfile.worker
 #
 # System binaries (local dev, not inside slim API container):
-#   ffmpeg + ffprobe on PATH for ingest/render (worker). Optional ML: pip install -r requirements-ml.txt
+#   ffmpeg + ffprobe on PATH for ingest/render (worker).
+#
+# ML / clipper prerequisites:
+#   This repo's default local install includes faster-whisper + embeddings (see requirements-ml.txt).
+#   If you want a lighter install, comment out the requirements-ml include below.
 -r requirements-worker.txt
+-r requirements-ml.txt

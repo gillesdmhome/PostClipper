@@ -60,6 +60,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://postclipper:postclipper@postgres:5432/postclipper
       DATA_DIR: /data
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      # If you run Ollama on the host, this lets the worker call it (Docker Desktop).
+      # On Linux, replace host.docker.internal with your host IP or run Ollama in compose.
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
     volumes:
       - postclipper_media:/data
     depends_on:

@@ -9,7 +9,10 @@ WORKDIR /app/backend
 
 COPY backend/requirements-api.txt ./requirements-api.txt
 COPY backend/requirements-worker.txt ./requirements-worker.txt
+COPY backend/requirements-ml.txt ./requirements-ml.txt
 RUN pip install --no-cache-dir -r requirements-worker.txt
+# Include ML deps for real transcription + embeddings in the worker image.
+RUN pip install --no-cache-dir -r requirements-ml.txt
 
 COPY backend/ .
 
